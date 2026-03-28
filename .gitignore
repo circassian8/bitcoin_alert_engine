@@ -1,0 +1,31 @@
+# macOS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+venv/
+*.egg-info/
+.eggs/
+
+# Local notebooks / env files
+.env
+.env.*
+.ipynb_checkpoints/
+
+# Research outputs and large local datasets
+/data*/
+/reports/
+/downloads/
+
+# Local run state
+*.log

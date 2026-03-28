@@ -1,0 +1,250 @@
+feature_blocks:
+  trend_bybit:
+    source: bybit
+    pit: strict
+    cadence:
+    - 15m
+    - 1h
+    - 4h
+    fields:
+    - ret_15m_1
+    - ret_1h_4
+    - ret_4h_6
+    - ema50_4h_gap
+    - ema50_4h_slope
+    - ema200_4h_slope
+    - adx14_4h
+    - atr_pctile_90d
+    - breakout_age_1h
+    - impulse_atr_1h
+    - pullback_depth_frac
+    - pullback_bars
+    - dist_to_breakout_level
+    - breakdown_age_1h
+    - downside_impulse_atr_1h
+    - rebound_depth_frac
+    - rebound_bars
+    - dist_to_breakdown_level
+    - dist_to_ema50_4h
+  regime_bybit:
+    source: bybit
+    pit: strict
+    cadence:
+    - 15m
+    - 1h
+    - 4h
+    fields:
+    - rv_1d
+    - rv_7d
+    - atr_pctile_90d
+    - jump_intensity_1d
+    - mark_index_gap
+    - premium_index_15m
+    - premium_z_7d
+    - stress_score
+    - trend_score
+    - range_score
+  crowding_bybit_feature:
+    source: bybit
+    pit: strict
+    cadence:
+    - 5m
+    - 15m
+    - 1h
+    fields:
+    - funding_8h
+    - funding_z_7d
+    - premium_index_15m
+    - premium_z_7d
+    - oi_level
+    - oi_change_1h
+    - oi_change_4h
+    - long_short_ratio_1h
+    - liq_longs_z_1h
+    - liq_shorts_z_1h
+  crowding_bybit_veto:
+    source: derived_from_bybit
+    pit: strict
+    cadence:
+    - 15m
+    - 1h
+    fields:
+    - crowding_long_score
+    - crowding_short_score
+    hard_rules:
+    - veto_long_if_crowding_long_score >= 2.5
+    - veto_long_if_funding_z_7d >= 3_and_premium_z_7d >= 3
+    - veto_short_if_crowding_short_score >= 2.5
+    - veto_short_if_funding_z_7d <= -3_and_premium_z_7d <= -3
+  micro_bybit_score:
+    source: bybit_ws
+    pit: strict
+    cadence:
+    - 1s
+    - 15m
+    fields:
+    - ofi_10s
+    - ofi_60s
+    - ofi_300s
+    - cum_delta_60s
+    - spread_bps
+    - spread_z
+    - bookimb_l1
+    - bookimb_l5
+    - bookimb_l10
+    - top10_depth_usd
+    - depth_decay
+    - vwap_mid_dev_30s
+    - replenish_rate_30s
+    - cancel_add_ratio_30s
+    - micro_vol_60s
+  micro_bybit_gate:
+    source: derived_from_bybit_ws
+    pit: strict
+    cadence:
+    - 1s
+    hard_rules:
+    - 'gate_pass_long: ofi_60s > 0 and median_bookimb_l10_60s > 0.05 and spread_z
+      < 1.5 and abs(vwap_mid_dev_30s_z) < 2'
+    - 'gate_pass_short: ofi_60s < 0 and median_bookimb_l10_60s < -0.05 and spread_z
+      < 1.5 and abs(vwap_mid_dev_30s_z) < 2'
+  options_deribit:
+    source: deribit
+    pit: strict
+    cadence:
+    - 5m
+    - 1h
+    fields:
+    - dvol_level
+    - dvol_z_30d
+    - dvol_change_1h
+  options_glassnode:
+    source: glassnode
+    pit: soft
+    cadence:
+    - 10m
+    - 1h
+    fields:
+    - iv_7d
+    - iv_30d
+    - iv_term_slope
+    - skew_25d
+    - put_call_iv_spread
+  onchain_glassnode:
+    source: glassnode
+    pit: mutable
+    cadence:
+    - 1h
+    - 1d
+    fields:
+    - exchange_balance
+    - exchange_netflow
+    - sopr
+    - nrpl
+    - etf_netflow
+  onchain_cryptoquant:
+    source: cryptoquant
+    pit: mutable
+    cadence:
+    - 1h
+    - 1d
+    fields:
+    - reserve
+    - inflow
+    - outflow
+    - inflow_spot_exchange
+    - inflow_derivative_exchange
+  aggregate_derivs_coinglass:
+    source: coinglass
+    pit: soft
+    cadence:
+    - 5m
+    - 1h
+    fields:
+    - btc_agg_oi
+    - btc_agg_funding
+    - btc_global_account_ratio
+  macro_veto:
+    source: official_calendars
+    pit: strict
+    cadence: event
+    fields:
+    - mins_to_fomc
+    - mins_to_cpi
+    - mins_to_nfp
+    - mins_to_pce
+    - mins_to_gdp
+schemas:
+  raw_event:
+    required_fields:
+    - source
+    - topic
+    - symbol
+    - exchange_ts
+    - local_received_ts
+    - payload
+  normalized_trade:
+    required_fields:
+    - ts
+    - symbol
+    - price
+    - size
+    - side
+    - trade_id
+    - seq
+  normalized_book_delta:
+    required_fields:
+    - ts
+    - symbol
+    - side
+    - price
+    - size
+    - update_id
+    - seq
+    - cts
+  candidate_event:
+    required_fields:
+    - ts
+    - venue
+    - symbol
+    - module
+    - side
+    - entry
+    - stop
+    - tp
+    - target_r_multiple
+    - timeout_bars
+    - rule_reasons
+    - veto_reasons
+    - features
+  scored_decision:
+    required_fields:
+    - ts
+    - candidate_id
+    - calibrated_p
+    - ev_r
+    - model_name
+    - calibration_name
+    - approved
+    - reject_reasons
+  candidate_label:
+    required_fields:
+    - candidate_id
+    - ts
+    - module
+    - symbol
+    - side
+    - signal_entry
+    - signal_tp
+    - executed_entry
+    - stop
+    - executed_tp
+    - target_r_multiple
+    - timeout_bars
+    - tp_before_sl_within_horizon
+    - tp1_before_sl_within_12h
+    - mfe_r_24h
+    - mae_r_24h
+    - net_r_24h_timeout
+    - minutes_to_tp_or_sl
+    - outcome
