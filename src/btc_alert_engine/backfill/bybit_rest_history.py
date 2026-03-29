@@ -8,6 +8,7 @@ from typing import Any, Callable, Iterable
 import httpx
 
 from btc_alert_engine.collectors.bybit_rest import BYBIT_REST_BASE
+from btc_alert_engine.profiles import interval_code_to_label
 from btc_alert_engine.schemas import RawEvent
 from btc_alert_engine.storage.raw_ndjson import RawEventWriter
 
@@ -23,6 +24,17 @@ class BybitHistorySpec:
 
 
 _DAY_MS = 24 * 60 * 60 * 1000
+_BAR_INTERVAL_MS = {
+    "1": 60 * 1000,
+    "3": 3 * 60 * 1000,
+    "5": 5 * 60 * 1000,
+    "15": 15 * 60 * 1000,
+    "30": 30 * 60 * 1000,
+    "60": 60 * 60 * 1000,
+    "120": 120 * 60 * 1000,
+    "240": 240 * 60 * 1000,
+}
+
 _OI_INTERVAL_MS = {
     "5min": 5 * 60 * 1000,
     "15min": 15 * 60 * 1000,
@@ -34,53 +46,69 @@ _OI_INTERVAL_MS = {
 _RATIO_INTERVAL_MS = dict(_OI_INTERVAL_MS)
 
 
-def default_bybit_history_specs(*, oi_interval: str = "5min", account_ratio_period: str = "5min") -> list[BybitHistorySpec]:
+def default_bybit_history_specs(
+    *,
+    oi_interval: str = "5min",
+    account_ratio_period: str = "5min",
+    bar_intervals: tuple[str, ...] = ("15",),
+) -> list[BybitHistorySpec]:
     if oi_interval not in _OI_INTERVAL_MS:
         raise ValueError(f"Unsupported oi_interval: {oi_interval}")
     if account_ratio_period not in _RATIO_INTERVAL_MS:
         raise ValueError(f"Unsupported account_ratio_period: {account_ratio_period}")
+    for interval in bar_intervals:
+        if interval not in _BAR_INTERVAL_MS:
+            raise ValueError(f"Unsupported bar interval: {interval}")
     oi_points_per_page = 200
     ratio_points_per_page = 500
-    return [
-        BybitHistorySpec(
-            name="kline_15",
-            path="/v5/market/kline",
-            step_ms=7 * _DAY_MS,
-            params_builder=lambda category, symbol, start, end: {
-                "category": category,
-                "symbol": symbol,
-                "interval": "15",
-                "start": start,
-                "end": end,
-                "limit": 1000,
-            },
-        ),
-        BybitHistorySpec(
-            name="index_price_kline_15",
-            path="/v5/market/index-price-kline",
-            step_ms=7 * _DAY_MS,
-            params_builder=lambda category, symbol, start, end: {
-                "category": category,
-                "symbol": symbol,
-                "interval": "15",
-                "start": start,
-                "end": end,
-                "limit": 1000,
-            },
-        ),
-        BybitHistorySpec(
-            name="premium_index_price_kline_15",
-            path="/v5/market/premium-index-price-kline",
-            step_ms=7 * _DAY_MS,
-            params_builder=lambda category, symbol, start, end: {
-                "category": category,
-                "symbol": symbol,
-                "interval": "15",
-                "start": start,
-                "end": end,
-                "limit": 1000,
-            },
-        ),
+    specs: list[BybitHistorySpec] = []
+    for interval in bar_intervals:
+        bars_per_page = 1000
+        step_ms = _BAR_INTERVAL_MS[interval] * (bars_per_page - 1)
+        specs.extend(
+            [
+                BybitHistorySpec(
+                    name=f"kline_{interval}",
+                    path="/v5/market/kline",
+                    step_ms=step_ms,
+                    params_builder=lambda category, symbol, start, end, interval=interval: {
+                        "category": category,
+                        "symbol": symbol,
+                        "interval": interval,
+                        "start": start,
+                        "end": end,
+                        "limit": bars_per_page,
+                    },
+                ),
+                BybitHistorySpec(
+                    name=f"index_price_kline_{interval}",
+                    path="/v5/market/index-price-kline",
+                    step_ms=step_ms,
+                    params_builder=lambda category, symbol, start, end, interval=interval: {
+                        "category": category,
+                        "symbol": symbol,
+                        "interval": interval,
+                        "start": start,
+                        "end": end,
+                        "limit": bars_per_page,
+                    },
+                ),
+                BybitHistorySpec(
+                    name=f"premium_index_price_kline_{interval}",
+                    path="/v5/market/premium-index-price-kline",
+                    step_ms=step_ms,
+                    params_builder=lambda category, symbol, start, end, interval=interval: {
+                        "category": category,
+                        "symbol": symbol,
+                        "interval": interval,
+                        "start": start,
+                        "end": end,
+                        "limit": bars_per_page,
+                    },
+                ),
+            ]
+        )
+    specs.extend([
         BybitHistorySpec(
             name="funding_history",
             path="/v5/market/funding/history",
@@ -119,7 +147,8 @@ def default_bybit_history_specs(*, oi_interval: str = "5min", account_ratio_peri
                 "limit": ratio_points_per_page,
             },
         ),
-    ]
+    ])
+    return specs
 
 
 def _iter_windows(start_ms: int, end_ms: int, *, step_ms: int) -> Iterable[tuple[int, int]]:
@@ -135,6 +164,24 @@ def _dataset_requested(requested: list[str] | None, spec_name: str) -> bool:
     if requested is None:
         return True
     if spec_name in requested:
+        return True
+    if spec_name.startswith("kline_"):
+        interval_code = spec_name.split("_", 1)[1]
+        if f"kline_{interval_code_to_label(interval_code)}" in requested:
+            return True
+    if spec_name.startswith("kline_") and "kline" in requested:
+        return True
+    if spec_name.startswith("index_price_kline_"):
+        interval_code = spec_name.rsplit("_", 1)[1]
+        if f"index_price_kline_{interval_code_to_label(interval_code)}" in requested:
+            return True
+    if spec_name.startswith("index_price_kline_") and "index_price_kline" in requested:
+        return True
+    if spec_name.startswith("premium_index_price_kline_"):
+        interval_code = spec_name.rsplit("_", 1)[1]
+        if f"premium_index_price_kline_{interval_code_to_label(interval_code)}" in requested:
+            return True
+    if spec_name.startswith("premium_index_price_kline_") and "premium_index_price_kline" in requested:
         return True
     if spec_name.startswith("open_interest_") and "open_interest" in requested:
         return True
@@ -153,12 +200,17 @@ async def backfill_bybit_rest_history(
     datasets: list[str] | None = None,
     oi_interval: str = "5min",
     account_ratio_period: str = "5min",
+    bar_intervals: tuple[str, ...] = ("15",),
     testnet: bool = False,
     timeout_s: float = 20.0,
     sleep_s: float = 0.0,
     client: httpx.AsyncClient | None = None,
 ) -> dict[str, int]:
-    specs = default_bybit_history_specs(oi_interval=oi_interval, account_ratio_period=account_ratio_period)
+    specs = default_bybit_history_specs(
+        oi_interval=oi_interval,
+        account_ratio_period=account_ratio_period,
+        bar_intervals=bar_intervals,
+    )
     selected = [spec for spec in specs if _dataset_requested(datasets, spec.name)]
     counts = {spec.name: 0 for spec in selected}
     owns_client = client is None

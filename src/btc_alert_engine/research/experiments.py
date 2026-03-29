@@ -8,6 +8,7 @@ from typing import Any, Iterable
 import pandas as pd
 
 from btc_alert_engine.features.bybit_foundation import load_micro_buckets, load_price_bars
+from btc_alert_engine.profiles import CORE_PROFILE, FAST_PROFILE, profile_for_generator
 from btc_alert_engine.research.labeling import candidate_id, label_candidates
 from btc_alert_engine.schemas import (
     CandidateEvent,
@@ -32,7 +33,9 @@ from btc_alert_engine.strategy.bybit_candidates import (
 
 BLOCK_NAMESPACE_ALIASES: dict[str, str] = {
     "trend_bybit": "features/trend_bybit",
+    "trend_bybit_fast": "features/trend_bybit_fast",
     "regime_bybit": "features/regime_bybit",
+    "regime_bybit_fast": "features/regime_bybit_fast",
     "crowding_bybit_feature": "features/crowding_bybit",
     "crowding_bybit_veto": "features/crowding_bybit",
     "micro_bybit_score": "features/micro_bybit",
@@ -47,7 +50,9 @@ BLOCK_NAMESPACE_ALIASES: dict[str, str] = {
 
 FEATURE_ONLY_BLOCKS = {
     "trend_bybit",
+    "trend_bybit_fast",
     "regime_bybit",
+    "regime_bybit_fast",
     "crowding_bybit_feature",
     "micro_bybit_score",
     "options_deribit",
@@ -64,6 +69,28 @@ KNOWN_OPTIONAL_BLOCKS = {
     "onchain_glassnode",
     "onchain_cryptoquant",
     "aggregate_derivs_coinglass",
+}
+
+TREND_LEGACY_ALIAS_COLUMNS = {
+    "ret_15m_1": "ret_trigger_1",
+    "ret_1h_4": "ret_setup_4",
+    "ret_4h_6": "ret_regime_6",
+    "ema50_4h_gap": "ema_fast_regime_gap",
+    "ema50_4h_slope": "ema_fast_regime_slope",
+    "ema200_4h_slope": "ema_slow_regime_slope",
+    "adx14_4h": "adx_regime",
+    "breakout_age_1h": "setup_break_age",
+    "impulse_atr_1h": "setup_impulse_atr",
+    "pullback_depth_frac": "setup_pullback_depth_frac",
+    "pullback_bars": "setup_pullback_bars",
+    "dist_to_breakout_level": "dist_to_setup_breakout_level",
+    "dist_to_ema50_4h": "dist_to_regime_ema",
+    "breakdown_age_1h": "setup_breakdown_age",
+    "downside_impulse_atr_1h": "setup_downside_impulse_atr",
+    "bounce_depth_frac": "setup_bounce_depth_frac",
+    "bounce_bars": "setup_bounce_bars",
+    "dist_to_breakdown_level": "dist_to_setup_breakdown_level",
+    "dist_below_ema50_4h": "dist_below_regime_ema",
 }
 
 
@@ -97,7 +124,9 @@ class ExperimentAvailability:
 
 FEATURE_SCHEMA_MAP: dict[str, type] = {
     "trend_bybit": TrendFeatureSnapshot,
+    "trend_bybit_fast": TrendFeatureSnapshot,
     "regime_bybit": RegimeFeatureSnapshot,
+    "regime_bybit_fast": RegimeFeatureSnapshot,
     "crowding_bybit_feature": CrowdingFeatureSnapshot,
     "crowding_bybit_veto": CrowdingFeatureSnapshot,
     "micro_bybit_score": MicroFeatureSnapshot,
@@ -114,6 +143,8 @@ FEATURE_SCHEMA_MAP: dict[str, type] = {
 INTRINSIC_CANDIDATE_FEATURES_BY_MODULE: dict[str, set[str]] = {
     "continuation_v1": {"atr15", "signal_risk", "signal_risk_pct", "side_sign"},
     "stress_reversal_v0": {"atr15", "signal_risk", "signal_risk_pct", "side_sign"},
+    "continuation_v1_fast": {"atr15", "signal_risk", "signal_risk_pct", "side_sign"},
+    "stress_reversal_v0_fast": {"atr15", "signal_risk", "signal_risk_pct", "side_sign"},
 }
 
 
@@ -141,8 +172,8 @@ def load_block_frame(derived_dir: Path, symbol: str, block_name: str) -> pd.Data
     return df
 
 
-def load_trade_bars(derived_dir: Path, symbol: str) -> list[PriceBar]:
-    path = derived_dir / "bars" / "bybit" / "trade_15m" / symbol
+def load_trade_bars(derived_dir: Path, symbol: str, *, interval_label: str) -> list[PriceBar]:
+    path = derived_dir / "bars" / "bybit" / f"trade_{interval_label}" / symbol
     if not path.exists():
         return []
     return load_price_bars([path])
@@ -257,10 +288,13 @@ def _load_generator_inputs(
         "micro": [],
         "macro": [],
     }
-    if generator == "continuation_v1":
-        inputs["trend"] = _load_typed_features(derived_dir, symbol, "trend_bybit")
+    profile = profile_for_generator(generator)
+    trend_block = profile.feature_block_trend
+    regime_block = profile.feature_block_regime
+    if generator in {CORE_PROFILE.continuation_module, FAST_PROFILE.continuation_module}:
+        inputs["trend"] = _load_typed_features(derived_dir, symbol, trend_block)
         if config.require_regime_gate:
-            inputs["regime"] = _load_typed_features(derived_dir, symbol, "regime_bybit")
+            inputs["regime"] = _load_typed_features(derived_dir, symbol, regime_block)
         if config.require_crowding_veto:
             inputs["crowding"] = _load_typed_features(derived_dir, symbol, "crowding_bybit_veto")
         if config.require_micro_gate:
@@ -268,8 +302,8 @@ def _load_generator_inputs(
         if config.require_macro_veto:
             inputs["macro"] = _load_typed_features(derived_dir, symbol, "macro_veto")
         return inputs
-    if generator == "stress_reversal_v0":
-        inputs["regime"] = _load_typed_features(derived_dir, symbol, "regime_bybit")
+    if generator in {CORE_PROFILE.stress_reversal_module, FAST_PROFILE.stress_reversal_module}:
+        inputs["regime"] = _load_typed_features(derived_dir, symbol, regime_block)
         if config.require_crowding_veto:
             inputs["crowding"] = _load_typed_features(derived_dir, symbol, "crowding_bybit_veto")
         if config.require_micro_gate:
@@ -294,8 +328,12 @@ def build_experiment_event_frame(
     experiment_id = str(experiment["id"])
     generator = str(experiment["generator"])
     blocks = list(experiment.get("blocks", []))
+    try:
+        profile = profile_for_generator(generator)
+    except KeyError:
+        return ExperimentDataset(experiment_id, generator, blocks, pd.DataFrame(), [], pd.DataFrame(), skip_reason=f"unknown_generator:{generator}")
 
-    trade_bars = load_trade_bars(derived_dir, symbol)
+    trade_bars = load_trade_bars(derived_dir, symbol, interval_label=profile.trigger_interval_label)
     micro_path = derived_dir / "micro" / "bybit" / "1s" / symbol
     micro_buckets = load_micro_buckets([micro_path]) if micro_path.exists() else []
     if not trade_bars:
@@ -304,7 +342,7 @@ def build_experiment_event_frame(
     config = derive_candidate_config(experiment)
     generator_inputs = _load_generator_inputs(derived_dir, symbol, generator=generator, config=config)
 
-    if generator == "continuation_v1":
+    if generator in {CORE_PROFILE.continuation_module, FAST_PROFILE.continuation_module}:
         candidates = build_continuation_candidates(
             trade_bars,
             generator_inputs["trend"],
@@ -320,8 +358,9 @@ def build_experiment_event_frame(
             stop_width_multiplier=config.stop_width_multiplier,
             target_r_multiple=config.target_r_multiple,
             sides=config.sides,
+            profile=profile,
         )
-    elif generator == "stress_reversal_v0":
+    elif generator in {CORE_PROFILE.stress_reversal_module, FAST_PROFILE.stress_reversal_module}:
         candidates = build_stress_reversal_candidates(
             trade_bars,
             generator_inputs["regime"],
@@ -333,6 +372,7 @@ def build_experiment_event_frame(
             require_macro_veto=config.require_macro_veto,
             macro_features=generator_inputs["macro"],
             sides=config.sides,
+            profile=profile,
         )
     else:
         return ExperimentDataset(experiment_id, generator, blocks, pd.DataFrame(), [], pd.DataFrame(), skip_reason=f"unknown_generator:{generator}")
@@ -387,6 +427,17 @@ def feature_columns_for_experiment(frame: pd.DataFrame, blocks: list[str]) -> li
             continue
         prefix = f"{block}__"
         block_cols = [col for col in frame.columns if col.startswith(prefix)]
+        if block == "trend_bybit":
+            filtered_cols: list[str] = []
+            for col in block_cols:
+                raw_name = col[len(prefix):]
+                generic_name = TREND_LEGACY_ALIAS_COLUMNS.get(raw_name)
+                if generic_name and f"{prefix}{generic_name}" in frame.columns:
+                    continue
+                filtered_cols.append(col)
+            block_cols = filtered_cols
+        if block == "regime_bybit" and f"{prefix}premium_index_trigger" in frame.columns:
+            block_cols = [col for col in block_cols if col != f"{prefix}premium_index_15m"]
         if block == "micro_bybit_score":
             block_cols = [
                 col

@@ -6,9 +6,9 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
-from btc_alert_engine.features.common import bars_to_ohlcv_frame, reindex_ffill
 from btc_alert_engine.features.indicators import adx, atr, ema, resample_ohlcv, rolling_percentile_of_last, rolling_zscore, softmax_scores
 from btc_alert_engine.normalize.bybit_rest import parse_account_ratio_event, parse_funding_history_event, parse_open_interest_event
+from btc_alert_engine.profiles import StrategyProfile, get_profile
 from btc_alert_engine.schemas import (
     CrowdingFeatureSnapshot,
     MicroBucket1s,
@@ -24,7 +24,15 @@ EPS = 1e-12
 
 
 def _bars_to_frame(bars: Iterable[PriceBar]) -> pd.DataFrame:
-    return bars_to_ohlcv_frame(bars)
+    records = [bar.model_dump(mode="json") if isinstance(bar, PriceBar) else bar for bar in bars]
+    if not records:
+        return pd.DataFrame(columns=["open", "high", "low", "close", "volume", "turnover"])
+    df = pd.DataFrame(records)
+    df = df.drop_duplicates(subset=["ts"], keep="last").sort_values("ts")
+    df.index = pd.to_datetime(df["ts"], unit="ms", utc=True)
+    for col in ["open", "high", "low", "close", "volume", "turnover"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df[["open", "high", "low", "close", "volume", "turnover"]]
 
 
 def _micro_to_frame(buckets: Iterable[MicroBucket1s | dict]) -> pd.DataFrame:
@@ -37,6 +45,17 @@ def _micro_to_frame(buckets: Iterable[MicroBucket1s | dict]) -> pd.DataFrame:
     return df
 
 
+def _snapshot_value(value: object) -> object:
+    if value is None or pd.isna(value):
+        return None
+    if isinstance(value, (str, bool)):
+        return value
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return value
+
+
 def load_price_bars(paths: Iterable[str]) -> list[PriceBar]:
     return [PriceBar.model_validate(record) for record in iter_json_records(paths)]
 
@@ -45,39 +64,52 @@ def load_micro_buckets(paths: Iterable[str]) -> list[MicroBucket1s]:
     return [MicroBucket1s.model_validate(record) for record in iter_json_records(paths)]
 
 
-def _trend_feature_frame(trade_bars: Iterable[PriceBar]) -> pd.DataFrame:
-    trade_15m = _bars_to_frame(trade_bars)
-    if trade_15m.empty:
+def _profile_metadata(profile: StrategyProfile) -> dict[str, str]:
+    return {
+        "profile_id": profile.id,
+        "trigger_interval": profile.trigger_interval_label,
+        "setup_interval": profile.setup_interval_label,
+        "regime_interval": profile.regime_interval_label,
+    }
+
+
+def _bars_per_day(profile: StrategyProfile) -> int:
+    return profile.regime_bars_per_day
+
+
+def _trend_feature_frame(trigger_bars: Iterable[PriceBar], *, profile: StrategyProfile) -> pd.DataFrame:
+    trigger_df = _bars_to_frame(trigger_bars)
+    if trigger_df.empty:
         return pd.DataFrame()
 
-    bars_1h = resample_ohlcv(trade_15m, "1h")
-    bars_4h = resample_ohlcv(trade_15m, "4h")
+    bars_setup = resample_ohlcv(trigger_df, profile.setup_resample_rule)
+    bars_regime = resample_ohlcv(trigger_df, profile.regime_resample_rule)
 
-    close_4h = bars_4h["close"]
-    ema50_4h = ema(close_4h, 50)
-    ema200_4h = ema(close_4h, 200)
-    atr14_4h = atr(bars_4h, 14)
-    adx14_4h = adx(bars_4h, 14)
-    atr_pctile_90d = rolling_percentile_of_last(atr14_4h, window=90 * 6)
+    close_regime = bars_regime["close"]
+    ema_fast_regime = ema(close_regime, profile.regime_ema_fast)
+    ema_slow_regime = ema(close_regime, profile.regime_ema_slow)
+    atr_regime = atr(bars_regime, profile.atr_period)
+    adx_regime = adx(bars_regime, profile.adx_period)
+    atr_pctile_90d = rolling_percentile_of_last(atr_regime, window=profile.atr_percentile_days * _bars_per_day(profile))
 
-    four_h = pd.DataFrame(index=bars_4h.index)
-    four_h["ret_4h_6"] = close_4h.pct_change(6)
-    four_h["ema50_4h_gap"] = (close_4h - ema50_4h) / close_4h.replace(0, np.nan)
-    four_h["ema50_4h_slope"] = ema50_4h.pct_change(5, fill_method=None)
-    four_h["ema200_4h_slope"] = ema200_4h.pct_change(5, fill_method=None)
-    four_h["adx14_4h"] = adx14_4h
-    four_h["atr_pctile_90d"] = atr_pctile_90d
-    four_h["ema50_4h"] = ema50_4h
+    regime = pd.DataFrame(index=bars_regime.index)
+    regime["ret_regime_6"] = close_regime.pct_change(6)
+    regime["ema_fast_regime_gap"] = (close_regime - ema_fast_regime) / close_regime.replace(0, np.nan)
+    regime["ema_fast_regime_slope"] = ema_fast_regime.pct_change(profile.regime_slope_lookback, fill_method=None)
+    regime["ema_slow_regime_slope"] = ema_slow_regime.pct_change(profile.regime_slope_lookback, fill_method=None)
+    regime["adx_regime"] = adx_regime
+    regime["atr_pctile_90d"] = atr_pctile_90d
+    regime["ema_fast_regime"] = ema_fast_regime
 
-    close_1h = bars_1h["close"]
-    atr14_1h = atr(bars_1h, 14)
-    prior20_high = bars_1h["high"].shift(1).rolling(20, min_periods=20).max()
-    prior20_low = bars_1h["low"].shift(1).rolling(20, min_periods=20).min()
-    breakout_flag = close_1h > prior20_high
-    breakdown_flag = close_1h < prior20_low
+    close_setup = bars_setup["close"]
+    atr_setup = atr(bars_setup, profile.atr_period)
+    prior_setup_high = bars_setup["high"].shift(1).rolling(profile.setup_breakout_lookback, min_periods=profile.setup_breakout_lookback).max()
+    prior_setup_low = bars_setup["low"].shift(1).rolling(profile.setup_breakout_lookback, min_periods=profile.setup_breakout_lookback).min()
+    breakout_flag = close_setup > prior_setup_high
+    breakdown_flag = close_setup < prior_setup_low
 
-    one_h = pd.DataFrame(index=bars_1h.index)
-    one_h["ret_1h_4"] = close_1h.pct_change(4)
+    setup = pd.DataFrame(index=bars_setup.index)
+    setup["ret_setup_4"] = close_setup.pct_change(4)
 
     breakout_age: list[float] = []
     impulse_atr: list[float] = []
@@ -103,20 +135,18 @@ def _trend_feature_frame(trade_bars: Iterable[PriceBar]) -> pd.DataFrame:
     low_since_breakdown = float("nan")
     bars_since_low = float("nan")
 
-    for i, (_, row) in enumerate(bars_1h.iterrows()):
-        _raw_atr = float(atr14_1h.iloc[i])
-        current_atr = _raw_atr if not math.isnan(_raw_atr) else float("nan")
+    for i, (_, row) in enumerate(bars_setup.iterrows()):
+        current_atr = float(atr_setup.iloc[i]) if not math.isnan(float(atr_setup.iloc[i])) else float("nan")
 
-        _raw_prior_high = float(prior20_high.iloc[i])
-        if bool(breakout_flag.iloc[i]) and not math.isnan(_raw_prior_high):
+        if bool(breakout_flag.iloc[i]) and not math.isnan(float(prior_setup_high.iloc[i])):
             active_breakout_idx = i
-            breakout_level = _raw_prior_high
+            breakout_level = float(prior_setup_high.iloc[i])
             long_impulse = ((float(row["close"]) - breakout_level) / current_atr) if current_atr and not math.isnan(current_atr) else float("nan")
             high_since_breakout = float(row["high"])
             bars_since_high = 0.0
         elif active_breakout_idx is not None:
             age = i - active_breakout_idx
-            if age > 10:
+            if age > profile.setup_active_bars:
                 active_breakout_idx = None
                 breakout_level = float("nan")
                 long_impulse = float("nan")
@@ -129,16 +159,15 @@ def _trend_feature_frame(trade_bars: Iterable[PriceBar]) -> pd.DataFrame:
                 else:
                     bars_since_high = 0.0 if math.isnan(bars_since_high) else bars_since_high + 1.0
 
-        _raw_prior_low = float(prior20_low.iloc[i])
-        if bool(breakdown_flag.iloc[i]) and not math.isnan(_raw_prior_low):
+        if bool(breakdown_flag.iloc[i]) and not math.isnan(float(prior_setup_low.iloc[i])):
             active_breakdown_idx = i
-            breakdown_level = _raw_prior_low
+            breakdown_level = float(prior_setup_low.iloc[i])
             short_impulse = ((breakdown_level - float(row["close"])) / current_atr) if current_atr and not math.isnan(current_atr) else float("nan")
             low_since_breakdown = float(row["low"])
             bars_since_low = 0.0
         elif active_breakdown_idx is not None:
             age = i - active_breakdown_idx
-            if age > 10:
+            if age > profile.setup_active_bars:
                 active_breakdown_idx = None
                 breakdown_level = float("nan")
                 short_impulse = float("nan")
@@ -183,102 +212,168 @@ def _trend_feature_frame(trade_bars: Iterable[PriceBar]) -> pd.DataFrame:
             bounce_depth_frac.append(bounce_depth)
             bounce_bars.append(bars_since_low)
 
-    one_h["breakout_age_1h"] = breakout_age
-    one_h["impulse_atr_1h"] = impulse_atr
-    one_h["pullback_depth_frac"] = pullback_depth_frac
-    one_h["pullback_bars"] = pullback_bars
-    one_h["breakout_level"] = breakout_level_vals
-    one_h["breakdown_age_1h"] = breakdown_age
-    one_h["downside_impulse_atr_1h"] = downside_impulse_atr
-    one_h["bounce_depth_frac"] = bounce_depth_frac
-    one_h["bounce_bars"] = bounce_bars
-    one_h["breakdown_level"] = breakdown_level_vals
+    setup["setup_break_age"] = breakout_age
+    setup["setup_impulse_atr"] = impulse_atr
+    setup["setup_pullback_depth_frac"] = pullback_depth_frac
+    setup["setup_pullback_bars"] = pullback_bars
+    setup["setup_breakout_level"] = breakout_level_vals
+    setup["setup_breakdown_age"] = breakdown_age
+    setup["setup_downside_impulse_atr"] = downside_impulse_atr
+    setup["setup_bounce_depth_frac"] = bounce_depth_frac
+    setup["setup_bounce_bars"] = bounce_bars
+    setup["setup_breakdown_level"] = breakdown_level_vals
 
-    trend = pd.DataFrame(index=trade_15m.index)
-    trend["ret_15m_1"] = trade_15m["close"].pct_change(1)
-    trend = trend.join(reindex_ffill(one_h, trade_15m.index), how="left")
-    trend = trend.join(reindex_ffill(four_h, trade_15m.index), how="left")
-    trend["dist_to_breakout_level"] = (trade_15m["close"] - trend["breakout_level"]) / trade_15m["close"].replace(0, np.nan)
-    trend["dist_to_ema50_4h"] = (trade_15m["close"] - trend["ema50_4h"]) / trade_15m["close"].replace(0, np.nan)
-    trend["dist_to_breakdown_level"] = (trend["breakdown_level"] - trade_15m["close"]) / trade_15m["close"].replace(0, np.nan)
-    trend["dist_below_ema50_4h"] = (trend["ema50_4h"] - trade_15m["close"]) / trade_15m["close"].replace(0, np.nan)
-    trend["symbol"] = "BTCUSDT"
-    return trend[[
-        "ret_15m_1",
-        "ret_1h_4",
-        "ret_4h_6",
-        "ema50_4h_gap",
-        "ema50_4h_slope",
-        "ema200_4h_slope",
-        "adx14_4h",
+    trend = pd.DataFrame(index=trigger_df.index)
+    trend["ret_trigger_1"] = trigger_df["close"].pct_change(1)
+    trend = trend.join(setup.reindex(trigger_df.index, method="ffill"), how="left")
+    trend = trend.join(regime.reindex(trigger_df.index, method="ffill"), how="left")
+    trend["dist_to_setup_breakout_level"] = (trigger_df["close"] - trend["setup_breakout_level"]) / trigger_df["close"].replace(0, np.nan)
+    trend["dist_to_regime_ema"] = (trigger_df["close"] - trend["ema_fast_regime"]) / trigger_df["close"].replace(0, np.nan)
+    trend["dist_to_setup_breakdown_level"] = (trend["setup_breakdown_level"] - trigger_df["close"]) / trigger_df["close"].replace(0, np.nan)
+    trend["dist_below_regime_ema"] = (trend["ema_fast_regime"] - trigger_df["close"]) / trigger_df["close"].replace(0, np.nan)
+    for key, value in _profile_metadata(profile).items():
+        trend[key] = value
+
+    if profile.id == "core":
+        trend["ret_15m_1"] = trend["ret_trigger_1"]
+        trend["ret_1h_4"] = trend["ret_setup_4"]
+        trend["ret_4h_6"] = trend["ret_regime_6"]
+        trend["ema50_4h_gap"] = trend["ema_fast_regime_gap"]
+        trend["ema50_4h_slope"] = trend["ema_fast_regime_slope"]
+        trend["ema200_4h_slope"] = trend["ema_slow_regime_slope"]
+        trend["adx14_4h"] = trend["adx_regime"]
+        trend["breakout_age_1h"] = trend["setup_break_age"]
+        trend["impulse_atr_1h"] = trend["setup_impulse_atr"]
+        trend["pullback_depth_frac"] = trend["setup_pullback_depth_frac"]
+        trend["pullback_bars"] = trend["setup_pullback_bars"]
+        trend["dist_to_breakout_level"] = trend["dist_to_setup_breakout_level"]
+        trend["dist_to_ema50_4h"] = trend["dist_to_regime_ema"]
+        trend["breakdown_age_1h"] = trend["setup_breakdown_age"]
+        trend["downside_impulse_atr_1h"] = trend["setup_downside_impulse_atr"]
+        trend["bounce_depth_frac"] = trend["setup_bounce_depth_frac"]
+        trend["bounce_bars"] = trend["setup_bounce_bars"]
+        trend["dist_to_breakdown_level"] = trend["dist_to_setup_breakdown_level"]
+        trend["dist_below_ema50_4h"] = trend["dist_below_regime_ema"]
+
+    columns = [
+        "profile_id",
+        "trigger_interval",
+        "setup_interval",
+        "regime_interval",
+        "ret_trigger_1",
+        "ret_setup_4",
+        "ret_regime_6",
+        "ema_fast_regime_gap",
+        "ema_fast_regime_slope",
+        "ema_slow_regime_slope",
+        "adx_regime",
         "atr_pctile_90d",
-        "breakout_age_1h",
-        "impulse_atr_1h",
-        "pullback_depth_frac",
-        "pullback_bars",
-        "dist_to_breakout_level",
-        "dist_to_ema50_4h",
-        "breakdown_age_1h",
-        "downside_impulse_atr_1h",
-        "bounce_depth_frac",
-        "bounce_bars",
-        "dist_to_breakdown_level",
-        "dist_below_ema50_4h",
-    ]]
+        "setup_break_age",
+        "setup_impulse_atr",
+        "setup_pullback_depth_frac",
+        "setup_pullback_bars",
+        "dist_to_setup_breakout_level",
+        "dist_to_regime_ema",
+        "setup_breakdown_age",
+        "setup_downside_impulse_atr",
+        "setup_bounce_depth_frac",
+        "setup_bounce_bars",
+        "dist_to_setup_breakdown_level",
+        "dist_below_regime_ema",
+    ]
+    if profile.id == "core":
+        columns.extend([
+            "ret_15m_1",
+            "ret_1h_4",
+            "ret_4h_6",
+            "ema50_4h_gap",
+            "ema50_4h_slope",
+            "ema200_4h_slope",
+            "adx14_4h",
+            "breakout_age_1h",
+            "impulse_atr_1h",
+            "pullback_depth_frac",
+            "pullback_bars",
+            "dist_to_breakout_level",
+            "dist_to_ema50_4h",
+            "breakdown_age_1h",
+            "downside_impulse_atr_1h",
+            "bounce_depth_frac",
+            "bounce_bars",
+            "dist_to_breakdown_level",
+            "dist_below_ema50_4h",
+        ])
+    return trend[columns]
 
 
-def build_trend_features(trade_bars: Iterable[PriceBar], *, symbol: str) -> list[TrendFeatureSnapshot]:
-    frame = _trend_feature_frame(trade_bars)
+def build_trend_features(trigger_bars: Iterable[PriceBar], *, symbol: str, profile: str | StrategyProfile = "core") -> list[TrendFeatureSnapshot]:
+    resolved_profile = get_profile(profile)
+    frame = _trend_feature_frame(trigger_bars, profile=resolved_profile)
     snapshots: list[TrendFeatureSnapshot] = []
     for ts, row in frame.iterrows():
-        snapshots.append(TrendFeatureSnapshot(ts=int(ts.timestamp() * 1000), symbol=symbol, **{k: (None if pd.isna(v) else float(v)) for k, v in row.items()}))
+        snapshots.append(TrendFeatureSnapshot(ts=int(ts.timestamp() * 1000), symbol=symbol, **{k: _snapshot_value(v) for k, v in row.items()}))
     return snapshots
 
 
-def build_regime_features(trade_bars: Iterable[PriceBar], index_bars: Iterable[PriceBar], premium_bars: Iterable[PriceBar], *, symbol: str) -> list[RegimeFeatureSnapshot]:
-    trade_15m = _bars_to_frame(trade_bars)
-    index_15m = _bars_to_frame(index_bars)
-    premium_15m = _bars_to_frame(premium_bars)
-    if trade_15m.empty:
+def build_regime_features(
+    trigger_bars: Iterable[PriceBar],
+    index_bars: Iterable[PriceBar],
+    premium_bars: Iterable[PriceBar],
+    *,
+    symbol: str,
+    profile: str | StrategyProfile = "core",
+) -> list[RegimeFeatureSnapshot]:
+    resolved_profile = get_profile(profile)
+    trigger_df = _bars_to_frame(trigger_bars)
+    index_df = _bars_to_frame(index_bars)
+    premium_df = _bars_to_frame(premium_bars)
+    if trigger_df.empty:
         return []
-    trend = _trend_feature_frame(trade_bars)
+    trend = _trend_feature_frame(trigger_bars, profile=resolved_profile)
 
-    close = trade_15m["close"]
+    close = trigger_df["close"]
     log_ret = np.log(close / close.shift(1))
-    rv_1d = log_ret.rolling(96, min_periods=24).std(ddof=0) * np.sqrt(96)
-    rv_7d = log_ret.rolling(96 * 7, min_periods=96).std(ddof=0) * np.sqrt(96)
-    ret_std_1d = log_ret.rolling(96, min_periods=24).std(ddof=0)
-    jump_intensity_1d = (log_ret.abs() > (3 * ret_std_1d)).astype(float).rolling(96, min_periods=24).mean()
+    trigger_bars_per_day = max((24 * 60) // resolved_profile.trigger_minutes, 1)
+    rv_1d = log_ret.rolling(trigger_bars_per_day, min_periods=max(trigger_bars_per_day // 4, 4)).std(ddof=0) * np.sqrt(trigger_bars_per_day)
+    rv_7d = log_ret.rolling(trigger_bars_per_day * 7, min_periods=trigger_bars_per_day).std(ddof=0) * np.sqrt(trigger_bars_per_day)
+    ret_std_1d = log_ret.rolling(trigger_bars_per_day, min_periods=max(trigger_bars_per_day // 4, 4)).std(ddof=0)
+    jump_intensity_1d = (log_ret.abs() > (3 * ret_std_1d)).astype(float).rolling(trigger_bars_per_day, min_periods=max(trigger_bars_per_day // 4, 4)).mean()
 
-    regime = pd.DataFrame(index=trade_15m.index)
+    regime = pd.DataFrame(index=trigger_df.index)
     regime["rv_1d"] = rv_1d
     regime["rv_7d"] = rv_7d
     regime["atr_pctile_90d"] = trend["atr_pctile_90d"]
     regime["jump_intensity_1d"] = jump_intensity_1d
+    for key, value in _profile_metadata(resolved_profile).items():
+        regime[key] = value
 
-    if not index_15m.empty:
-        idx_close = reindex_ffill(index_15m["close"], trade_15m.index)
+    if not index_df.empty:
+        idx_close = index_df["close"].reindex(trigger_df.index, method="ffill")
         regime["mark_index_gap"] = (close - idx_close) / idx_close.replace(0, np.nan)
     else:
         regime["mark_index_gap"] = np.nan
 
-    if not premium_15m.empty:
-        prem_close = reindex_ffill(premium_15m["close"], trade_15m.index)
-        regime["premium_index_15m"] = prem_close
-        regime["premium_z_7d"] = rolling_zscore(prem_close, 96 * 7, min_periods=96)
+    premium_window = trigger_bars_per_day * 7
+    if not premium_df.empty:
+        prem_close = premium_df["close"].reindex(trigger_df.index, method="ffill")
+        regime["premium_index_trigger"] = prem_close
+        if resolved_profile.id == "core":
+            regime["premium_index_15m"] = prem_close
+        regime["premium_z_7d"] = rolling_zscore(prem_close, premium_window, min_periods=max(trigger_bars_per_day, 16))
     else:
+        regime["premium_index_trigger"] = np.nan
         regime["premium_index_15m"] = np.nan
         regime["premium_z_7d"] = np.nan
 
     trend_raw = (
-        1.2 * (trend["adx14_4h"].fillna(0) / 25.0)
-        + 2.0 * trend["ema50_4h_gap"].abs().fillna(0) * 100
-        + 0.5 * trend["ret_4h_6"].abs().fillna(0) * 10
+        1.2 * (trend["adx_regime"].fillna(0) / 25.0)
+        + 2.0 * trend["ema_fast_regime_gap"].abs().fillna(0) * 100
+        + 0.5 * trend["ret_regime_6"].abs().fillna(0) * 10
         - 0.5 * regime["atr_pctile_90d"].fillna(0) / 100.0
     )
     range_raw = (
-        -1.5 * trend["ema50_4h_gap"].abs().fillna(0) * 100
-        - 0.8 * (trend["adx14_4h"].fillna(0) / 25.0)
+        -1.5 * trend["ema_fast_regime_gap"].abs().fillna(0) * 100
+        - 0.8 * (trend["adx_regime"].fillna(0) / 25.0)
         + 0.6 * (1.0 - regime["atr_pctile_90d"].fillna(0) / 100.0)
         - 20.0 * regime["mark_index_gap"].abs().fillna(0)
     )
@@ -295,7 +390,7 @@ def build_regime_features(trade_bars: Iterable[PriceBar], index_bars: Iterable[P
 
     snapshots: list[RegimeFeatureSnapshot] = []
     for ts, row in regime.iterrows():
-        snapshots.append(RegimeFeatureSnapshot(ts=int(ts.timestamp() * 1000), symbol=symbol, **{k: (None if pd.isna(v) else float(v)) for k, v in row.items()}))
+        snapshots.append(RegimeFeatureSnapshot(ts=int(ts.timestamp() * 1000), symbol=symbol, **{k: _snapshot_value(v) for k, v in row.items()}))
     return snapshots
 
 
@@ -353,7 +448,7 @@ def build_crowding_features(
     base = base.resample("15min").last()
 
     if not funding_df.empty:
-        funding_15 = reindex_ffill(funding_df["funding_rate"].resample("15min").ffill(), base.index)
+        funding_15 = funding_df["funding_rate"].resample("15min").ffill().reindex(base.index, method="ffill")
         base["funding_8h"] = funding_15
         base["funding_z_7d"] = rolling_zscore(funding_15, 96 * 7, min_periods=96)
     else:
@@ -361,7 +456,7 @@ def build_crowding_features(
         base["funding_z_7d"] = np.nan
 
     if not premium_df.empty:
-        prem_15 = reindex_ffill(premium_df["close"].resample("15min").last(), base.index)
+        prem_15 = premium_df["close"].resample("15min").last().reindex(base.index, method="ffill")
         base["premium_index_15m"] = prem_15
         base["premium_z_7d"] = rolling_zscore(prem_15, 96 * 7, min_periods=96)
     else:
@@ -369,7 +464,7 @@ def build_crowding_features(
         base["premium_z_7d"] = np.nan
 
     if not oi_df.empty:
-        oi_15 = reindex_ffill(oi_df["open_interest"].resample("15min").ffill(), base.index)
+        oi_15 = oi_df["open_interest"].resample("15min").ffill().reindex(base.index, method="ffill")
         base["oi_level"] = oi_15
         base["oi_change_1h"] = oi_15.pct_change(4)
         base["oi_change_4h"] = oi_15.pct_change(16)
@@ -381,7 +476,7 @@ def build_crowding_features(
         base["oi_change_4h_z"] = np.nan
 
     if not ratio_df.empty:
-        ratio_15 = reindex_ffill(ratio_df[["buy_ratio", "sell_ratio"]].resample("15min").ffill(), base.index)
+        ratio_15 = ratio_df[["buy_ratio", "sell_ratio"]].resample("15min").ffill().reindex(base.index, method="ffill")
         long_short_ratio = ratio_15["buy_ratio"] / ratio_15["sell_ratio"].replace(0, np.nan)
         base["long_short_ratio_1h"] = long_short_ratio
         base["long_short_ratio_z"] = rolling_zscore(np.log(long_short_ratio.replace(0, np.nan)), 96 * 7, min_periods=96)

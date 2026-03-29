@@ -27,6 +27,38 @@ feature_blocks:
     - bounce_bars
     - dist_to_breakdown_level
     - dist_below_ema50_4h
+  trend_bybit_fast:
+    source: bybit
+    pit: strict
+    cadence:
+    - 5m
+    - 15m
+    - 1h
+    fields:
+    - profile_id
+    - trigger_interval
+    - setup_interval
+    - regime_interval
+    - ret_trigger_1
+    - ret_setup_4
+    - ret_regime_6
+    - ema_fast_regime_gap
+    - ema_fast_regime_slope
+    - ema_slow_regime_slope
+    - adx_regime
+    - atr_pctile_90d
+    - setup_break_age
+    - setup_impulse_atr
+    - setup_pullback_depth_frac
+    - setup_pullback_bars
+    - dist_to_setup_breakout_level
+    - dist_to_regime_ema
+    - setup_breakdown_age
+    - setup_downside_impulse_atr
+    - setup_bounce_depth_frac
+    - setup_bounce_bars
+    - dist_to_setup_breakdown_level
+    - dist_below_regime_ema
   regime_bybit:
     source: bybit
     pit: strict
@@ -41,6 +73,28 @@ feature_blocks:
     - jump_intensity_1d
     - mark_index_gap
     - premium_index_15m
+    - premium_z_7d
+    - stress_score
+    - trend_score
+    - range_score
+  regime_bybit_fast:
+    source: bybit
+    pit: strict
+    cadence:
+    - 5m
+    - 15m
+    - 1h
+    fields:
+    - profile_id
+    - trigger_interval
+    - setup_interval
+    - regime_interval
+    - rv_1d
+    - rv_7d
+    - atr_pctile_90d
+    - jump_intensity_1d
+    - mark_index_gap
+    - premium_index_trigger
     - premium_z_7d
     - stress_score
     - trend_score
@@ -82,6 +136,7 @@ feature_blocks:
     pit: strict
     cadence:
     - 1s
+    - 5m
     - 15m
     fields:
     - ofi_10s

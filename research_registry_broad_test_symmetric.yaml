@@ -208,14 +208,6 @@ experiments:
   sides:
   - long
   - short
-- id: R1_stress_reversal
-  generator: stress_reversal_v0
-  blocks:
-  - regime_bybit
-  - crowding_bybit_veto
-  sides:
-  - long
-  - short
 validation:
   archive_target:
     start: 2024-01-01

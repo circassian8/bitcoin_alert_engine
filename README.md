@@ -83,7 +83,7 @@ Use backfill commands to seed the raw event store before or alongside live colle
 
 ```bash
 btc-alert-engine backfill bybit-rest-history --symbol BTCUSDT --start 2024-01-01T00:00:00Z --end 2024-01-07T00:00:00Z --data-dir ./data
-btc-alert-engine backfill bybit-rest-history --symbol BTCUSDT --start 2025-09-01T00:00:00Z --end 2026-03-26T00:00:00Z --oi-interval 1h --account-ratio-period 1h --data-dir ./data
+btc-alert-engine backfill bybit-rest-history --symbol BTCUSDT --start 2025-09-01T00:00:00Z --end 2026-03-26T00:00:00Z --bar-intervals 5 15 --oi-interval 1h --account-ratio-period 1h --data-dir ./data
 btc-alert-engine backfill deribit-dvol-history --currency BTC --start 2024-01-01T00:00:00Z --end 2024-01-07T00:00:00Z --data-dir ./data
 ```
 
@@ -128,14 +128,14 @@ Example:
 ```bash
 btc-alert-engine materialize bybit-bars --input ./data/raw
 btc-alert-engine materialize micro-buckets --input ./data/raw
-btc-alert-engine features bybit-foundation --data-dir ./data
+btc-alert-engine features bybit-foundation --data-dir ./data --profiles core fast
 btc-alert-engine features options-deribit --data-dir ./data
 btc-alert-engine features macro-veto --data-dir ./data
 btc-alert-engine features glassnode-options --data-dir ./data
 btc-alert-engine features glassnode-onchain --data-dir ./data
 btc-alert-engine features cryptoquant-onchain --data-dir ./data
 btc-alert-engine features coinglass-overlay --data-dir ./data
-btc-alert-engine signals bybit-candidates --data-dir ./data --enable-macro-veto --sides long short
+btc-alert-engine signals bybit-candidates --data-dir ./data --enable-macro-veto --profiles core fast --sides long short
 btc-alert-engine research label-candidates --data-dir ./data --latency-ms 0
 btc-alert-engine research walkforward --data-dir ./data --registry ./research_registry.yaml --skip-missing
 btc-alert-engine verify project --data-dir ./data --registry ./research_registry.yaml --contracts ./feature_contracts.yaml --strict
@@ -183,6 +183,12 @@ Symmetric long/short research presets are included as:
 - `research_registry_broad_test_symmetric.yaml`
 - `scripts/run_real_data_smoke_walkforward_symmetric.sh`
 - `scripts/run_real_data_broad_walkforward_symmetric.sh`
+
+A faster compressed-timeframe challenger is also included:
+- `research_registry_smoke_fast_symmetric.yaml`
+- `research_registry_broad_test_fast_symmetric.yaml`
+- `scripts/run_real_data_smoke_walkforward_fast_symmetric.sh`
+- `scripts/run_real_data_broad_walkforward_fast_symmetric.sh`
 
 
 ## Verification

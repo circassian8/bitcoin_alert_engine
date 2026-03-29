@@ -8,6 +8,7 @@ from typing import Any
 import pandas as pd
 
 from btc_alert_engine.config import default_reports_root, load_feature_contracts, load_research_registry
+from btc_alert_engine.profiles import profile_for_generator
 from btc_alert_engine.provenance import compare_provenance, load_manifest, report_provenance
 from btc_alert_engine.research.execution import build_raw_execution_tape
 from btc_alert_engine.research.experiments import (
@@ -109,9 +110,15 @@ def _model_field_names(model_cls: type) -> set[str]:
 def _max_label_horizon_hours(registry: Any) -> int:
     timeout_map = registry.labeling.get("timeout_15m_bars_by_module") or {}
     if timeout_map:
-        max_bars = max(int(value) for value in timeout_map.values())
-    else:
-        max_bars = int(registry.labeling.get("timeout_15m_bars", 0))
+        max_minutes = 0
+        for module_name, bars in timeout_map.items():
+            try:
+                profile = profile_for_generator(module_name)
+                max_minutes = max(max_minutes, int(bars) * profile.trigger_minutes)
+            except Exception:
+                max_minutes = max(max_minutes, int(bars) * 15)
+        return max_minutes // 60
+    max_bars = int(registry.labeling.get("timeout_15m_bars", 0))
     return max_bars * 15 // 60
 
 

@@ -160,6 +160,29 @@ class MicroBucket1s(BaseModel):
 class TrendFeatureSnapshot(BaseModel):
     ts: int
     symbol: str
+    profile_id: str | None = None
+    trigger_interval: str | None = None
+    setup_interval: str | None = None
+    regime_interval: str | None = None
+    ret_trigger_1: float | None = None
+    ret_setup_4: float | None = None
+    ret_regime_6: float | None = None
+    ema_fast_regime_gap: float | None = None
+    ema_fast_regime_slope: float | None = None
+    ema_slow_regime_slope: float | None = None
+    adx_regime: float | None = None
+    setup_break_age: float | None = None
+    setup_impulse_atr: float | None = None
+    setup_pullback_depth_frac: float | None = None
+    setup_pullback_bars: float | None = None
+    dist_to_setup_breakout_level: float | None = None
+    dist_to_regime_ema: float | None = None
+    setup_breakdown_age: float | None = None
+    setup_downside_impulse_atr: float | None = None
+    setup_bounce_depth_frac: float | None = None
+    setup_bounce_bars: float | None = None
+    dist_to_setup_breakdown_level: float | None = None
+    dist_below_regime_ema: float | None = None
     ret_15m_1: float | None = None
     ret_1h_4: float | None = None
     ret_4h_6: float | None = None
@@ -181,20 +204,63 @@ class TrendFeatureSnapshot(BaseModel):
     dist_to_breakdown_level: float | None = None
     dist_below_ema50_4h: float | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _compat_generic_fields(cls, values: Any) -> Any:
+        if not isinstance(values, dict):
+            return values
+        compat_pairs = [
+            ("ret_trigger_1", "ret_15m_1"),
+            ("ret_setup_4", "ret_1h_4"),
+            ("ret_regime_6", "ret_4h_6"),
+            ("ema_fast_regime_gap", "ema50_4h_gap"),
+            ("ema_fast_regime_slope", "ema50_4h_slope"),
+            ("ema_slow_regime_slope", "ema200_4h_slope"),
+            ("adx_regime", "adx14_4h"),
+            ("setup_break_age", "breakout_age_1h"),
+            ("setup_impulse_atr", "impulse_atr_1h"),
+            ("setup_pullback_depth_frac", "pullback_depth_frac"),
+            ("setup_pullback_bars", "pullback_bars"),
+            ("dist_to_setup_breakout_level", "dist_to_breakout_level"),
+            ("dist_to_regime_ema", "dist_to_ema50_4h"),
+            ("setup_breakdown_age", "breakdown_age_1h"),
+            ("setup_downside_impulse_atr", "downside_impulse_atr_1h"),
+            ("setup_bounce_depth_frac", "bounce_depth_frac"),
+            ("setup_bounce_bars", "bounce_bars"),
+            ("dist_to_setup_breakdown_level", "dist_to_breakdown_level"),
+            ("dist_below_regime_ema", "dist_below_ema50_4h"),
+        ]
+        for generic_name, legacy_name in compat_pairs:
+            if generic_name not in values and legacy_name in values:
+                values[generic_name] = values[legacy_name]
+        return values
+
 
 class RegimeFeatureSnapshot(BaseModel):
     ts: int
     symbol: str
+    profile_id: str | None = None
+    trigger_interval: str | None = None
+    setup_interval: str | None = None
+    regime_interval: str | None = None
     rv_1d: float | None = None
     rv_7d: float | None = None
     atr_pctile_90d: float | None = None
     jump_intensity_1d: float | None = None
     mark_index_gap: float | None = None
+    premium_index_trigger: float | None = None
     premium_index_15m: float | None = None
     premium_z_7d: float | None = None
     stress_score: float | None = None
     trend_score: float | None = None
     range_score: float | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compat_generic_fields(cls, values: Any) -> Any:
+        if isinstance(values, dict) and "premium_index_trigger" not in values and "premium_index_15m" in values:
+            values["premium_index_trigger"] = values["premium_index_15m"]
+        return values
 
 
 class CrowdingFeatureSnapshot(BaseModel):
@@ -311,7 +377,7 @@ class CandidateEvent(BaseModel):
     ts: int
     venue: str
     symbol: str
-    module: Literal["continuation_v1", "stress_reversal_v0"]
+    module: Literal["continuation_v1", "stress_reversal_v0", "continuation_v1_fast", "stress_reversal_v0_fast"]
     side: Literal["long", "short"]
     entry: float
     stop: float

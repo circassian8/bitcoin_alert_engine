@@ -1,8 +1,8 @@
 program:
-  id: btc_bybit_alert_engine_smoke_symmetric_v1
+  id: btc_bybit_alert_engine_smoke_fast_symmetric_v1
   version: 1
-  description: BTC-only smoke registry tuned for sparse real-data pilot runs on the
-    Bybit-native alert engine with mirrored long/short continuation and reversal candidates
+  description: BTC-only smoke test registry for the fast 1h/15m/5m mirrored long/short
+    continuation challenger
 execution:
   venue: bybit
   symbol: BTCUSDT
@@ -23,9 +23,9 @@ goal:
     cooldown_minutes: 0
 timeframes:
   micro: 1s
-  trigger: 15m
-  setup: 1h
-  regime: 4h
+  trigger: 5m
+  setup: 15m
+  regime: 1h
 data_sources:
   strict:
     bybit:
@@ -110,23 +110,23 @@ pit_policy:
     conservative_backtest_lag:
       default: 24h
 candidate_generators:
-  continuation_v1:
+  continuation_v1_fast:
     enabled: true
     side: long
     rules:
       regime:
-      - close_4h > ema200_4h
-      - ema50_4h > ema200_4h
-      - ema50_slope_4h_5bars > 0
+      - close_1h > ema200_1h
+      - ema50_1h > ema200_1h
+      - ema50_slope_1h_5bars > 0
       setup:
-      - breakout_above_prior_20bar_high_1h_within_last_10bars
-      - impulse_size_1h >= 1.0 * atr_1h
+      - breakout_above_prior_20bar_high_15m_within_last_10bars
+      - impulse_size_15m >= 1.0 * atr_15m
       - pullback_depth_frac in [0.20, 0.60]
-      - pullback_low > breakout_level - 0.25 * atr_1h
-      - pullback_low > ema50_4h
+      - pullback_low > breakout_level - 0.25 * atr_15m
+      - pullback_low > ema50_1h
       trigger:
-      - close_15m > pullback_pivot_high
-  stress_reversal_v0:
+      - close_5m > pullback_pivot_high
+  stress_reversal_v0_fast:
     enabled: true
     live_mode: log_only
     side: long
@@ -134,16 +134,16 @@ candidate_generators:
       stress:
       - atr_pctile_90d >= 95 or liq_notional_1h_z >= 3 or abs(funding_z_7d) >= 3
       trigger:
-      - sweep_below_prior_20bar_low_by_0.25_atr_15m
+      - sweep_below_prior_20bar_low_by_0.25_atr_5m
       - same_candle_closes_above_midpoint
-      - next_15m_close_reclaims_local_swing_pivot
+      - next_5m_close_reclaims_local_swing_pivot
 labeling:
   primary_label: tp_before_sl_within_horizon
   entry_price:
     preferred: first_best_ask_or_bid_from_next_1s_micro_bucket_after_trigger_close_plus_slippage
     fallback: next_trade_bar_open_plus_slippage_if_micro_quotes_missing
   stop_price:
-    continuation_long: pullback_low - 0.25 * atr_15m
+    continuation_long: pullback_low - 0.25 * atr_trigger
     reversal_long: sweep_low - 0.20 * atr_15m
   stop_loss_r: 1.0
   timeout_15m_bars: 96
@@ -156,6 +156,8 @@ labeling:
   take_profit_r_by_module:
     continuation_v1: 2.0
     stress_reversal_v0: 1.5
+    continuation_v1_fast: 2.0
+    stress_reversal_v0_fast: 1.5
   latency_ms: 0
   barrier_simulation:
     preferred: sequential_first_touch_from_raw_bybit_quotes_and_trades
@@ -164,6 +166,8 @@ labeling:
   timeout_15m_bars_by_module:
     continuation_v1: 96
     stress_reversal_v0: 32
+    continuation_v1_fast: 288
+    stress_reversal_v0_fast: 96
 models:
   baseline:
     type: logistic_regression
@@ -176,34 +180,34 @@ models:
     - sigmoid
 experiments:
 - id: S0_native_continuation
-  generator: continuation_v1
+  generator: continuation_v1_fast
   blocks:
-  - trend_bybit
+  - trend_bybit_fast
   sides:
   - long
   - short
 - id: S1_native_plus_regime
-  generator: continuation_v1
+  generator: continuation_v1_fast
   blocks:
-  - trend_bybit
-  - regime_bybit
+  - trend_bybit_fast
+  - regime_bybit_fast
   sides:
   - long
   - short
 - id: S2_plus_crowding_feature
-  generator: continuation_v1
+  generator: continuation_v1_fast
   blocks:
-  - trend_bybit
-  - regime_bybit
+  - trend_bybit_fast
+  - regime_bybit_fast
   - crowding_bybit_feature
   sides:
   - long
   - short
 - id: S3_plus_crowding_veto
-  generator: continuation_v1
+  generator: continuation_v1_fast
   blocks:
-  - trend_bybit
-  - regime_bybit
+  - trend_bybit_fast
+  - regime_bybit_fast
   - crowding_bybit_veto
   sides:
   - long

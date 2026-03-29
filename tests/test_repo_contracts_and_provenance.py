@@ -16,6 +16,10 @@ def test_readme_references_existing_symmetric_artifacts() -> None:
         "research_registry_broad_test_symmetric.yaml",
         "scripts/run_real_data_smoke_walkforward_symmetric.sh",
         "scripts/run_real_data_broad_walkforward_symmetric.sh",
+        "research_registry_smoke_fast_symmetric.yaml",
+        "research_registry_broad_test_fast_symmetric.yaml",
+        "scripts/run_real_data_smoke_walkforward_fast_symmetric.sh",
+        "scripts/run_real_data_broad_walkforward_fast_symmetric.sh",
     ]:
         assert relative_path in readme
         assert (repo_root / relative_path).exists()
@@ -25,6 +29,14 @@ def test_cli_supports_signal_sides_flag() -> None:
     parser = build_parser()
     args = parser.parse_args(["signals", "bybit-candidates", "--sides", "long", "short"])
     assert args.sides == ["long", "short"]
+
+
+def test_cli_supports_profiles_and_bar_intervals_flags() -> None:
+    parser = build_parser()
+    signal_args = parser.parse_args(["signals", "bybit-candidates", "--profiles", "core", "fast"])
+    backfill_args = parser.parse_args(["backfill", "bybit-rest-history", "--start", "2025-01-01T00:00:00Z", "--end", "2025-01-02T00:00:00Z", "--bar-intervals", "5", "15"])
+    assert signal_args.profiles == ["core", "fast"]
+    assert backfill_args.bar_intervals == ["5", "15"]
 
 
 def test_report_manifest_provenance_roundtrip(tmp_path: Path) -> None:

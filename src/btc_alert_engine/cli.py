@@ -36,6 +36,7 @@ from btc_alert_engine.features.external_context import (
 from btc_alert_engine.logging_config import configure_logging
 from btc_alert_engine.materialize.bybit_foundation import materialize_bybit_bars, materialize_micro_buckets
 from btc_alert_engine.normalize.replay import deterministic_replay_hash, replay_top_of_book
+from btc_alert_engine.profiles import all_profiles, get_profile
 from btc_alert_engine.research.labeling import label_candidates
 from btc_alert_engine.research.walkforward import run_walkforward_experiments
 from btc_alert_engine.schemas import (
@@ -90,6 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--start", required=True, help="Start timestamp (ms or ISO-8601)")
     p.add_argument("--end", required=True, help="End timestamp (ms or ISO-8601)")
     p.add_argument("--datasets", nargs="+", default=None, help="Optional dataset names, e.g. kline_15 funding_history open_interest account_ratio")
+    p.add_argument("--bar-intervals", nargs="+", default=["15"], help="Kline interval codes to backfill, e.g. 5 15 60")
     p.add_argument("--oi-interval", default="5min", choices=["5min", "15min", "30min", "1h", "4h", "1d"])
     p.add_argument("--account-ratio-period", default="5min", choices=["5min", "15min", "30min", "1h", "4h", "1d"])
     p.add_argument("--sleep-s", type=float, default=0.0)
@@ -168,6 +170,8 @@ def build_parser() -> argparse.ArgumentParser:
     ]:
         p = features_sub.add_parser(job)
         add_feature_args(p)
+        if job == "bybit-foundation":
+            p.add_argument("--profiles", nargs="+", choices=[profile.id for profile in all_profiles()], default=None)
 
     signals = subparsers.add_parser("signals")
     signals_sub = signals.add_subparsers(dest="signal_job", required=True)
@@ -176,6 +180,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--data-dir", default=None)
     p.add_argument("--enable-macro-veto", action="store_true")
     p.add_argument("--sides", nargs="+", choices=["long", "short"], default=["long"])
+    p.add_argument("--profiles", nargs="+", choices=[profile.id for profile in all_profiles()], default=["core"])
 
     research = subparsers.add_parser("research")
     research_sub = research.add_subparsers(dest="research_job", required=True)
@@ -220,10 +225,10 @@ def _parse_ts_arg(value: str) -> int:
     return int(ts.timestamp() * 1000)
 
 
-def _load_foundation_inputs(derived_dir: Path, symbol: str):
-    trade_path = derived_dir / "bars" / "bybit" / "trade_15m" / symbol
-    index_path = derived_dir / "bars" / "bybit" / "index_price_15m" / symbol
-    premium_path = derived_dir / "bars" / "bybit" / "premium_index_15m" / symbol
+def _load_bar_family(derived_dir: Path, symbol: str, *, interval_label: str):
+    trade_path = derived_dir / "bars" / "bybit" / f"trade_{interval_label}" / symbol
+    index_path = derived_dir / "bars" / "bybit" / f"index_price_{interval_label}" / symbol
+    premium_path = derived_dir / "bars" / "bybit" / f"premium_index_{interval_label}" / symbol
     micro_path = derived_dir / "micro" / "bybit" / "1s" / symbol
 
     trade_bars = load_price_bars([trade_path]) if trade_path.exists() else []
@@ -233,11 +238,25 @@ def _load_foundation_inputs(derived_dir: Path, symbol: str):
     return trade_bars, index_bars, premium_bars, micro_buckets
 
 
+def _load_foundation_inputs(derived_dir: Path, symbol: str):
+    return _load_bar_family(derived_dir, symbol, interval_label="15m")
+
+
 def _write_feature_block(derived_dir: Path, namespace: str, symbol: str, items: list[object]) -> int:
     with PartitionedNdjsonWriter(derived_dir) as writer:
         for item in items:
             writer.write(namespace=namespace, symbol=symbol, ts_ms=int(getattr(item, "ts")), record=item)
     return len(items)
+
+
+def _group_candidates_by_profile(candidates: list[CandidateEvent]) -> dict[str, list[CandidateEvent]]:
+    grouped: dict[str, list[CandidateEvent]] = {}
+    for candidate in candidates:
+        if candidate.module.endswith("_fast"):
+            grouped.setdefault("fast", []).append(candidate)
+        else:
+            grouped.setdefault("core", []).append(candidate)
+    return grouped
 
 
 async def _run_async(args: argparse.Namespace) -> None:
@@ -255,6 +274,7 @@ async def _run_async(args: argparse.Namespace) -> None:
                     start_ms=_parse_ts_arg(args.start),
                     end_ms=_parse_ts_arg(args.end),
                     datasets=args.datasets,
+                    bar_intervals=tuple(args.bar_intervals),
                     oi_interval=args.oi_interval,
                     account_ratio_period=args.account_ratio_period,
                     testnet=args.testnet or settings.bybit_testnet,
@@ -322,20 +342,37 @@ async def _run_async(args: argparse.Namespace) -> None:
         trade_bars, index_bars, premium_bars, micro_buckets = _load_foundation_inputs(derived_dir, symbol)
 
         if args.feature_job == "bybit-foundation":
-            trend = build_trend_features(trade_bars, symbol=symbol)
-            regime = build_regime_features(trade_bars, index_bars, premium_bars, symbol=symbol)
+            requested_profiles = [get_profile(profile_id) for profile_id in (args.profiles or [profile.id for profile in all_profiles()])]
+            trend_counts: dict[str, int] = {}
+            regime_counts: dict[str, int] = {}
             crowding = build_crowding_features(raw_input, premium_bars, micro_buckets, symbol=symbol)
             micro = build_micro_features(micro_buckets, symbol=symbol)
             with PartitionedNdjsonWriter(derived_dir) as writer:
-                for item in trend:
-                    writer.write(namespace="features/trend_bybit", symbol=symbol, ts_ms=item.ts, record=item)
-                for item in regime:
-                    writer.write(namespace="features/regime_bybit", symbol=symbol, ts_ms=item.ts, record=item)
+                for profile in requested_profiles:
+                    profile_trade_bars, profile_index_bars, profile_premium_bars, _ = _load_bar_family(
+                        derived_dir,
+                        symbol,
+                        interval_label=profile.trigger_interval_label,
+                    )
+                    if not profile_trade_bars:
+                        continue
+                    trend = build_trend_features(profile_trade_bars, symbol=symbol, profile=profile)
+                    regime = build_regime_features(profile_trade_bars, profile_index_bars, profile_premium_bars, symbol=symbol, profile=profile)
+                    trend_namespace = "features/trend_bybit" if profile.id == "core" else f"features/trend_bybit_{profile.id}"
+                    regime_namespace = "features/regime_bybit" if profile.id == "core" else f"features/regime_bybit_{profile.id}"
+                    for item in trend:
+                        writer.write(namespace=trend_namespace, symbol=symbol, ts_ms=item.ts, record=item)
+                    for item in regime:
+                        writer.write(namespace=regime_namespace, symbol=symbol, ts_ms=item.ts, record=item)
+                    trend_counts[profile.id] = len(trend)
+                    regime_counts[profile.id] = len(regime)
                 for item in crowding:
                     writer.write(namespace="features/crowding_bybit", symbol=symbol, ts_ms=item.ts, record=item)
                 for item in micro:
                     writer.write(namespace="features/micro_bybit", symbol=symbol, ts_ms=item.ts, record=item)
-            print(f"wrote_trend={len(trend)} wrote_regime={len(regime)} wrote_crowding={len(crowding)} wrote_micro={len(micro)}")
+            trend_msg = " ".join(f"trend_{profile}={count}" for profile, count in sorted(trend_counts.items())) or "trend=0"
+            regime_msg = " ".join(f"regime_{profile}={count}" for profile, count in sorted(regime_counts.items())) or "regime=0"
+            print(f"{trend_msg} {regime_msg} wrote_crowding={len(crowding)} wrote_micro={len(micro)}")
             return
 
         if args.feature_job == "options-deribit":
@@ -366,39 +403,53 @@ async def _run_async(args: argparse.Namespace) -> None:
     if args.command == "signals":
         derived_dir = data_dir / "derived"
         symbol = args.symbol
-        trade_bars, _, _, _ = _load_foundation_inputs(derived_dir, symbol)
-        trend = load_feature_models([derived_dir / "features" / "trend_bybit" / symbol], TrendFeatureSnapshot)
-        regime = load_feature_models([derived_dir / "features" / "regime_bybit" / symbol], RegimeFeatureSnapshot)
         crowding = load_feature_models([derived_dir / "features" / "crowding_bybit" / symbol], CrowdingFeatureSnapshot)
         micro = load_feature_models([derived_dir / "features" / "micro_bybit" / symbol], MicroFeatureSnapshot)
         macro_path = derived_dir / "features" / "macro_veto" / symbol
         macro = load_feature_models([macro_path], MacroVetoFeatureSnapshot) if macro_path.exists() else []
-        continuation = build_continuation_candidates(
-            trade_bars,
-            trend,
-            regime,
-            crowding,
-            micro,
-            symbol=symbol,
-            macro_features=macro,
-            require_macro_veto=bool(args.enable_macro_veto and macro),
-            sides=args.sides,
-        )
-        reversal = build_stress_reversal_candidates(
-            trade_bars,
-            regime,
-            crowding,
-            micro,
-            symbol=symbol,
-            macro_features=macro,
-            require_macro_veto=bool(args.enable_macro_veto and macro),
-            sides=args.sides,
-        )
+        continuation: list[CandidateEvent] = []
+        reversal: list[CandidateEvent] = []
+        for profile_id in args.profiles:
+            profile = get_profile(profile_id)
+            trade_bars_profile, _, _, _ = _load_bar_family(derived_dir, symbol, interval_label=profile.trigger_interval_label)
+            if not trade_bars_profile:
+                continue
+            trend_path = derived_dir / "features" / ("trend_bybit" if profile.id == "core" else f"trend_bybit_{profile.id}") / symbol
+            regime_path = derived_dir / "features" / ("regime_bybit" if profile.id == "core" else f"regime_bybit_{profile.id}") / symbol
+            trend = load_feature_models([trend_path], TrendFeatureSnapshot) if trend_path.exists() else []
+            regime = load_feature_models([regime_path], RegimeFeatureSnapshot) if regime_path.exists() else []
+            continuation.extend(
+                build_continuation_candidates(
+                    trade_bars_profile,
+                    trend,
+                    regime,
+                    crowding,
+                    micro,
+                    symbol=symbol,
+                    macro_features=macro,
+                    require_macro_veto=bool(args.enable_macro_veto and macro),
+                    sides=args.sides,
+                    profile=profile,
+                )
+            )
+            reversal.extend(
+                build_stress_reversal_candidates(
+                    trade_bars_profile,
+                    regime,
+                    crowding,
+                    micro,
+                    symbol=symbol,
+                    macro_features=macro,
+                    require_macro_veto=bool(args.enable_macro_veto and macro),
+                    sides=args.sides,
+                    profile=profile,
+                )
+            )
         with PartitionedNdjsonWriter(derived_dir) as writer:
             for item in continuation:
-                writer.write(namespace="candidates/continuation_v1", symbol=symbol, ts_ms=item.ts, record=item)
+                writer.write(namespace=f"candidates/{item.module}", symbol=symbol, ts_ms=item.ts, record=item)
             for item in reversal:
-                writer.write(namespace="candidates/stress_reversal_v0", symbol=symbol, ts_ms=item.ts, record=item)
+                writer.write(namespace=f"candidates/{item.module}", symbol=symbol, ts_ms=item.ts, record=item)
         print(f"wrote_continuation={len(continuation)} wrote_reversal={len(reversal)}")
         return
 
@@ -406,18 +457,33 @@ async def _run_async(args: argparse.Namespace) -> None:
         if args.research_job == "label-candidates":
             derived_dir = data_dir / "derived"
             symbol = args.symbol
-            trade_bars, _, _, micro_buckets = _load_foundation_inputs(derived_dir, symbol)
-            continuation = load_feature_models([derived_dir / "candidates" / "continuation_v1" / symbol], CandidateEvent)
-            reversal = load_feature_models([derived_dir / "candidates" / "stress_reversal_v0" / symbol], CandidateEvent)
+            _, _, _, micro_buckets = _load_foundation_inputs(derived_dir, symbol)
+            candidate_namespaces = [
+                "continuation_v1",
+                "stress_reversal_v0",
+                "continuation_v1_fast",
+                "stress_reversal_v0_fast",
+            ]
+            candidates: list[CandidateEvent] = []
+            for namespace in candidate_namespaces:
+                path = derived_dir / "candidates" / namespace / symbol
+                if path.exists():
+                    candidates.extend(load_feature_models([path], CandidateEvent))
             raw_paths = [raw_dir] if raw_dir.exists() else None
-            labels = label_candidates(
-                continuation + reversal,
-                trade_bars,
-                micro_buckets=micro_buckets,
-                raw_paths=raw_paths,
-                slippage_bps=args.slippage_bps,
-                latency_ms=args.latency_ms,
-            )
+            labels = []
+            for profile_id, grouped_candidates in _group_candidates_by_profile(candidates).items():
+                profile = get_profile(profile_id)
+                trade_bars_profile, _, _, _ = _load_bar_family(derived_dir, symbol, interval_label=profile.trigger_interval_label)
+                labels.extend(
+                    label_candidates(
+                        grouped_candidates,
+                        trade_bars_profile,
+                        micro_buckets=micro_buckets,
+                        raw_paths=raw_paths,
+                        slippage_bps=args.slippage_bps,
+                        latency_ms=args.latency_ms,
+                    )
+                )
             with PartitionedNdjsonWriter(derived_dir) as writer:
                 for item in labels:
                     writer.write(namespace="labels/bybit", symbol=symbol, ts_ms=item.ts, record=item)

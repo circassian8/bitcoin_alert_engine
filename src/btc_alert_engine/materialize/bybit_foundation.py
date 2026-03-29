@@ -8,6 +8,7 @@ from typing import Iterable
 
 from btc_alert_engine.normalize.bybit_public import parse_liquidation_payload, parse_orderbook_payload, parse_trade_payload
 from btc_alert_engine.normalize.bybit_rest import latest_by_timestamp, parse_kline_event
+from btc_alert_engine.profiles import interval_code_to_label
 from btc_alert_engine.normalize.orderbook import BybitOrderBookBuilder
 from btc_alert_engine.schemas import MicroBucket1s, PriceBar, RawEvent
 from btc_alert_engine.storage.raw_ndjson import iter_raw_events_sorted
@@ -210,22 +211,27 @@ class _MicroBucketAccumulator:
 
 
 def materialize_bybit_bars(paths: Iterable[str], *, symbol: str) -> dict[str, list[PriceBar]]:
-    by_kind: dict[str, dict[int, PriceBar]] = {
-        "trade_15m": {},
-        "index_price_15m": {},
-        "premium_index_15m": {},
-    }
+    by_kind: dict[str, dict[int, PriceBar]] = {}
+
+    def _kind_from_topic(topic: str) -> str | None:
+        if topic.startswith("rest.kline_"):
+            prefix = "trade"
+        elif topic.startswith("rest.index_price_kline_"):
+            prefix = "index_price"
+        elif topic.startswith("rest.premium_index_price_kline_"):
+            prefix = "premium_index"
+        else:
+            return None
+        interval_code = topic.split(".")[1].rsplit("_", 1)[1]
+        return f"{prefix}_{interval_code_to_label(interval_code)}"
+
     for event in iter_raw_events_sorted(paths):
         if event.source != "bybit_rest" or event.symbol != symbol:
             continue
-        if event.topic.startswith("rest.kline_"):
-            kind = "trade_15m"
-        elif event.topic.startswith("rest.index_price_kline_"):
-            kind = "index_price_15m"
-        elif event.topic.startswith("rest.premium_index_price_kline_"):
-            kind = "premium_index_15m"
-        else:
+        kind = _kind_from_topic(event.topic)
+        if kind is None:
             continue
+        by_kind.setdefault(kind, {})
         for bar in parse_kline_event(event):
             by_kind[kind][bar.ts] = bar
     return {kind: latest_by_timestamp(rows.values()) for kind, rows in by_kind.items() if rows}
