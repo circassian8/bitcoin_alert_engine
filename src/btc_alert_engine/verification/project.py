@@ -8,6 +8,7 @@ from typing import Any
 import pandas as pd
 
 from btc_alert_engine.config import default_reports_root, load_feature_contracts, load_research_registry
+from btc_alert_engine.provenance import compare_provenance, load_manifest, report_provenance
 from btc_alert_engine.research.execution import build_raw_execution_tape
 from btc_alert_engine.research.experiments import (
     BLOCK_NAMESPACE_ALIASES,
@@ -16,6 +17,18 @@ from btc_alert_engine.research.experiments import (
     block_path,
 )
 from btc_alert_engine.storage.partitioned_ndjson import iter_json_records
+
+STRICT_WARNING_CODES = {
+    "execution_tape_empty",
+    "micro_block_missing_for_experiment",
+    "bar_only_entry_fallback",
+    "bar_only_path_fallback",
+    "report_manifest_missing_provenance",
+    "report_manifest_registry_mismatch",
+    "report_manifest_code_mismatch",
+    "report_manifest_data_mismatch",
+    "report_manifest_contracts_mismatch",
+}
 
 
 @dataclass(slots=True)
@@ -57,11 +70,24 @@ class ExperimentStatus:
 
 
 @dataclass(slots=True)
+class ReportManifestStatus:
+    path: str
+    has_provenance: bool
+    registry_match: bool = False
+    source_tree_match: bool = False
+    data_state_match: bool = False
+    feature_contracts_match: bool = False
+    program_id: str | None = None
+
+
+@dataclass(slots=True)
 class VerificationReport:
     static_checks: list[StaticCheckResult]
     block_statuses: list[BlockDataStatus]
     execution_tape_status: ExecutionTapeStatus | None
     experiment_statuses: list[ExperimentStatus]
+    current_provenance: dict[str, Any] = field(default_factory=dict)
+    report_manifest_statuses: list[ReportManifestStatus] = field(default_factory=list)
 
     @property
     def errors(self) -> list[StaticCheckResult]:
@@ -70,6 +96,10 @@ class VerificationReport:
     @property
     def warnings(self) -> list[StaticCheckResult]:
         return [item for item in self.static_checks if item.level == "warning"]
+
+    @property
+    def strict_failures(self) -> list[StaticCheckResult]:
+        return [item for item in self.static_checks if item.level == "error" or item.code in STRICT_WARNING_CODES]
 
 
 def _model_field_names(model_cls: type) -> set[str]:
@@ -149,6 +179,9 @@ def run_static_contract_checks(registry_path: str | Path, contracts_path: str | 
         for block in experiment.get("blocks", []):
             if block not in FEATURE_SCHEMA_MAP and block in contract_blocks:
                 results.append(StaticCheckResult("warning", "experiment_block_not_implemented", f"Experiment `{exp_id}` uses `{block}`, which does not have a concrete schema implementation."))
+        for side in experiment.get("sides", ["long"]):
+            if str(side).lower() not in {"long", "short"}:
+                results.append(StaticCheckResult("error", "experiment_side_invalid", f"Experiment `{exp_id}` declares unsupported side `{side}`."))
 
     max_horizon_hours = _max_label_horizon_hours(registry)
     outer = registry.validation.get("outer_walk_forward", {})
@@ -195,7 +228,7 @@ def inspect_derived_blocks(derived_dir: str | Path, symbol: str, contracts_path:
             except Exception:
                 parse_errors += 1
         monotonic = ts_values == sorted(ts_values) if ts_values else True
-        unique_ts = len(ts_values) == len(set(ts_values))
+        unique_ts = len(ts_values) == len(set(ts_values)) if ts_values else True
         statuses.append(BlockDataStatus(block=block, exists=True, rows=rows, monotonic_ts=monotonic, unique_ts=unique_ts, parse_errors=parse_errors))
     return statuses
 
@@ -265,18 +298,31 @@ def inspect_experiments(
     return statuses
 
 
-def _reports_exist_without_inputs(data_dir: Path, experiment_statuses: list[ExperimentStatus]) -> bool:
-    report_roots = [default_reports_root(data_dir), data_dir / "reports"]
-    report_files: list[Path] = []
-    for reports_dir in report_roots:
-        if reports_dir.exists():
-            report_files.extend(reports_dir.rglob("summary_metrics.csv"))
-            report_files.extend(reports_dir.rglob("promotion_report.md"))
-    if not report_files:
-        return False
-    if not experiment_statuses:
-        return False
-    return all((status.skip_reason or "").startswith("missing_") or status.rows == 0 for status in experiment_statuses)
+def inspect_report_manifests(reports_root: str | Path, current_provenance: dict[str, Any]) -> list[ReportManifestStatus]:
+    root = Path(reports_root)
+    if not root.exists():
+        return []
+    statuses: list[ReportManifestStatus] = []
+    for manifest_path in sorted(root.rglob("manifest.json")):
+        try:
+            manifest = load_manifest(manifest_path)
+        except Exception:
+            statuses.append(ReportManifestStatus(path=str(manifest_path), has_provenance=False))
+            continue
+        recorded = manifest.get("provenance")
+        compare = compare_provenance(current_provenance, recorded)
+        statuses.append(
+            ReportManifestStatus(
+                path=str(manifest_path),
+                has_provenance=bool(compare["has_provenance"]),
+                registry_match=bool(compare["registry_match"]),
+                source_tree_match=bool(compare["source_tree_match"]),
+                data_state_match=bool(compare["data_state_match"]),
+                feature_contracts_match=bool(compare["feature_contracts_match"]),
+                program_id=manifest.get("program_id"),
+            )
+        )
+    return statuses
 
 
 def generate_verification_report(
@@ -286,13 +332,22 @@ def generate_verification_report(
     contracts_path: str | Path,
     symbol: str,
     slippage_bps: float = 1.0,
+    reports_root: str | Path | None = None,
 ) -> VerificationReport:
-    data_path = Path(data_dir)
-    derived_dir = data_path / "derived"
+    data_dir = Path(data_dir)
+    derived_dir = data_dir / "derived"
+    project_root = Path(registry_path).resolve().parent
+    current_prov = report_provenance(
+        project_root=project_root,
+        data_dir=data_dir,
+        registry_path=registry_path,
+        contracts_path=contracts_path,
+    )
     static_checks = run_static_contract_checks(registry_path, contracts_path)
     block_statuses = inspect_derived_blocks(derived_dir, symbol, contracts_path)
     execution_tape_status = inspect_execution_tape(data_dir=data_dir, symbol=symbol)
     experiment_statuses = inspect_experiments(derived_dir=derived_dir, registry_path=registry_path, symbol=symbol, slippage_bps=slippage_bps)
+    report_statuses = inspect_report_manifests(reports_root or default_reports_root(data_dir), current_prov)
 
     block_map = {item.block: item for item in block_statuses}
     if execution_tape_status is not None and execution_tape_status.rows == 0:
@@ -301,15 +356,6 @@ def generate_verification_report(
                 "warning",
                 "execution_tape_empty",
                 "Raw execution tape exists but contains 0 rows; entry and path simulation will fall back to micro buckets or bars.",
-            )
-        )
-
-    if _reports_exist_without_inputs(data_path, experiment_statuses):
-        static_checks.append(
-            StaticCheckResult(
-                "warning",
-                "reports_exist_but_inputs_missing",
-                "Report artifacts exist under data_dir/reports, but the current derived inputs are insufficient to rebuild the experiments. Treat the bundled reports as stale until you rerun the pipeline.",
             )
         )
 
@@ -341,11 +387,36 @@ def generate_verification_report(
                 )
             )
 
+    for manifest_status in report_statuses:
+        if not manifest_status.has_provenance:
+            static_checks.append(
+                StaticCheckResult("warning", "report_manifest_missing_provenance", f"Report manifest `{manifest_status.path}` is missing provenance metadata.")
+            )
+            continue
+        if not manifest_status.registry_match:
+            static_checks.append(
+                StaticCheckResult("warning", "report_manifest_registry_mismatch", f"Report manifest `{manifest_status.path}` was generated from a different registry configuration.")
+            )
+        if not manifest_status.source_tree_match:
+            static_checks.append(
+                StaticCheckResult("warning", "report_manifest_code_mismatch", f"Report manifest `{manifest_status.path}` does not match the current source tree hash.")
+            )
+        if not manifest_status.data_state_match:
+            static_checks.append(
+                StaticCheckResult("warning", "report_manifest_data_mismatch", f"Report manifest `{manifest_status.path}` does not match the current data state hash.")
+            )
+        if not manifest_status.feature_contracts_match:
+            static_checks.append(
+                StaticCheckResult("warning", "report_manifest_contracts_mismatch", f"Report manifest `{manifest_status.path}` does not match the current feature contracts hash.")
+            )
+
     return VerificationReport(
         static_checks=static_checks,
         block_statuses=block_statuses,
         execution_tape_status=execution_tape_status,
         experiment_statuses=experiment_statuses,
+        current_provenance=current_prov,
+        report_manifest_statuses=report_statuses,
     )
 
 
@@ -354,10 +425,12 @@ def write_verification_artifacts(report: VerificationReport, output_dir: str | P
     output_path.mkdir(parents=True, exist_ok=True)
 
     json_payload = {
+        "current_provenance": report.current_provenance,
         "static_checks": [asdict(item) for item in report.static_checks],
         "block_statuses": [asdict(item) for item in report.block_statuses],
         "execution_tape_status": asdict(report.execution_tape_status) if report.execution_tape_status is not None else None,
         "experiment_statuses": [asdict(item) for item in report.experiment_statuses],
+        "report_manifest_statuses": [asdict(item) for item in report.report_manifest_statuses],
     }
     (output_path / "verification_report.json").write_text(json.dumps(json_payload, indent=2), encoding="utf-8")
 
@@ -366,6 +439,13 @@ def write_verification_artifacts(report: VerificationReport, output_dir: str | P
         "",
         f"Errors: **{len(report.errors)}**",
         f"Warnings: **{len(report.warnings)}**",
+        f"Strict failures: **{len(report.strict_failures)}**",
+        "",
+        "## Current provenance",
+        "",
+        "```json",
+        json.dumps(report.current_provenance, indent=2),
+        "```",
         "",
         "## Static checks",
         "",
@@ -407,6 +487,17 @@ def write_verification_artifacts(report: VerificationReport, output_dir: str | P
             path_sources = ", ".join(f"{k}:{v}" for k, v in sorted(item.path_source_counts.items())) or "-"
             blocks = ", ".join(item.blocks) or "-"
             lines.append(f"| {item.experiment_id} | {blocks} | {item.skip_reason or '-'} | {item.rows} | {item.candidate_count} | {item.label_count} | {entry_sources} | {path_sources} |")
+
+    lines.extend(["", "## Existing report manifests", ""])
+    if not report.report_manifest_statuses:
+        lines.append("No existing report manifests were found.")
+    else:
+        lines.append("| path | has provenance | registry | code | data | contracts | program |")
+        lines.append("|---|---:|---:|---:|---:|---:|---|")
+        for item in report.report_manifest_statuses:
+            lines.append(
+                f"| {item.path} | {'yes' if item.has_provenance else 'no'} | {'yes' if item.registry_match else 'no'} | {'yes' if item.source_tree_match else 'no'} | {'yes' if item.data_state_match else 'no'} | {'yes' if item.feature_contracts_match else 'no'} | {item.program_id or '-'} |"
+            )
 
     (output_path / "verification_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return output_path

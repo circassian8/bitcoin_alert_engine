@@ -48,15 +48,6 @@ If you want a broader untouched test window for a less noisy success-rate read o
 bash scripts/run_real_data_broad_walkforward.sh
 ```
 
-If you want the same smoke / broad presets but with **mirrored long + short** continuation and stress-reversal candidates, use:
-
-```bash
-bash scripts/run_real_data_smoke_walkforward_symmetric.sh
-bash scripts/run_real_data_broad_walkforward_symmetric.sh
-```
-
-These symmetric registries use `research_registry_smoke_symmetric.yaml` and `research_registry_broad_test_symmetric.yaml` respectively, and now include both mirrored continuation and stress-reversal experiments.
-
 That preset uses [research_registry_broad_test.yaml](/Users/nasrenkaraf/Documents/Projects/btc_bybit_alert_engine_starter_v2/research_registry_broad_test.yaml), which keeps the same smoke experiments but widens the final untouched test to July 1, 2025 through March 26, 2026, with calibration on April 1, 2025 through June 30, 2025. The broader walk-forward report is written to `./reports/data-pilot-long/walkforward_broad_test` by default.
 
 To visualize any fired-alert CSV as an interactive HTML dashboard, run:
@@ -174,7 +165,7 @@ btc-alert-engine import-macro-csv --csv ./macro_events.csv --data-dir ./data
 ```bash
 btc-alert-engine materialize bybit-bars --input ./data/raw --data-dir ./data
 btc-alert-engine materialize micro-buckets --input ./data/raw --data-dir ./data
-btc-alert-engine features bybit-foundation --data-dir ./data  # rerun after pulling the mirrored short-support update
+btc-alert-engine features bybit-foundation --data-dir ./data
 btc-alert-engine features options-deribit --data-dir ./data
 btc-alert-engine features macro-veto --data-dir ./data
 ```

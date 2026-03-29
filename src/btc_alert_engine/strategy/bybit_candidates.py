@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, TypeVar
+from typing import Iterable, Sequence, TypeVar
 
 import numpy as np
 import pandas as pd
@@ -18,6 +18,9 @@ from btc_alert_engine.schemas import (
 from btc_alert_engine.storage.partitioned_ndjson import iter_json_records
 
 T = TypeVar("T")
+
+
+VALID_SIDES = ("long", "short")
 
 
 def _bars_to_frame(bars: Iterable[PriceBar]) -> pd.DataFrame:
@@ -70,60 +73,17 @@ def _optional_float(value: object) -> float | None:
     return float(value)
 
 
-def _normalize_requested_sides(sides: Iterable[str] | None) -> tuple[str, ...]:
-    requested = tuple(dict.fromkeys(side.lower() for side in (sides or ("long",))))
-    valid = tuple(side for side in requested if side in {"long", "short"})
-    return valid or ("long",)
-
-
-def _micro_gate_for_side(row: pd.Series, side: str) -> bool:
-    if side == "long":
-        legacy_gate = row.get("gate_pass")
-        if legacy_gate is not None and not pd.isna(legacy_gate) and bool(legacy_gate):
-            return True
-        gate_value = row.get("gate_pass_long")
-        if gate_value is not None and not pd.isna(gate_value):
-            return bool(gate_value)
-    else:
-        gate_value = row.get("gate_pass_short")
-        if gate_value is not None and not pd.isna(gate_value):
-            return bool(gate_value)
-    ofi_60s = _numeric_or_nan(row.get("ofi_60s"))
-    median_bookimb = _numeric_or_nan(row.get("median_bookimb_l10_60s"))
-    spread_z = _numeric_or_nan(row.get("spread_z"))
-    vwap_mid_dev_z = _numeric_or_nan(row.get("vwap_mid_dev_30s_z"))
-    if side == "long":
-        return ofi_60s > 0 and median_bookimb > 0.05 and spread_z < 1.5 and abs(vwap_mid_dev_z) < 2.0
-    return ofi_60s < 0 and median_bookimb < -0.05 and spread_z < 1.5 and abs(vwap_mid_dev_z) < 2.0
-
-
-def _continuation_feature_payload(
-    row: pd.Series,
-    *,
-    side: str,
-    atr15_value: float,
-    setup_age: float,
-    setup_impulse_atr: float,
-    setup_depth_frac: float,
-    setup_dist_to_level: float,
-    setup_dist_to_ema50: float,
-) -> dict[str, float | bool | None]:
-    crowding_key = "crowding_long_score" if side == "long" else "crowding_short_score"
-    return {
-        "side_sign": 1.0 if side == "long" else -1.0,
-        "trend_score": _optional_float(row.get("trend_score")),
-        "stress_score": _optional_float(row.get("stress_score")),
-        "crowding_score": _optional_float(row.get(crowding_key)),
-        "ofi_60s": _optional_float(row.get("ofi_60s")),
-        "median_bookimb_l10_60s": _optional_float(row.get("median_bookimb_l10_60s")),
-        "atr15": atr15_value,
-        "setup_age_1h": setup_age,
-        "setup_impulse_atr_1h": setup_impulse_atr,
-        "setup_pullback_depth_frac": setup_depth_frac,
-        "setup_dist_to_level_aligned": setup_dist_to_level,
-        "setup_dist_to_ema50_4h_aligned": setup_dist_to_ema50,
-        "veto_active": bool(row.get("veto_active", False)) if pd.notna(row.get("veto_active")) else False,
-    }
+def _normalize_sides(sides: Sequence[str] | None) -> list[str]:
+    if not sides:
+        return ["long"]
+    normalized: list[str] = []
+    for side in sides:
+        value = str(side).lower()
+        if value not in VALID_SIDES:
+            raise ValueError(f"Unsupported side: {side}")
+        if value not in normalized:
+            normalized.append(value)
+    return normalized or ["long"]
 
 
 def build_continuation_candidates(
@@ -141,12 +101,14 @@ def build_continuation_candidates(
     require_crowding_veto: bool = True,
     require_micro_gate: bool = True,
     require_macro_veto: bool = False,
-    sides: Iterable[str] | None = None,
+    stop_width_multiplier: float = 1.0,
+    target_r_multiple: float = 2.0,
+    sides: Sequence[str] | None = None,
 ) -> list[CandidateEvent]:
-    """Build mirrored continuation candidates for the requested sides."""
     price = _bars_to_frame(trade_bars)
     if price.empty:
         return []
+    run_sides = _normalize_sides(sides)
     trend = _align_feature_frame(trend_features, price.index)
     regime = _align_feature_frame(regime_features, price.index)
     crowding = _align_feature_frame(crowding_features, price.index)
@@ -155,8 +117,8 @@ def build_continuation_candidates(
 
     atr15 = atr(price, 14)
     recent_pivot_high = price["high"].shift(1).rolling(4, min_periods=4).max()
-    recent_pivot_low = price["low"].shift(1).rolling(4, min_periods=4).min()
     recent_stop_low = price["low"].shift(1).rolling(4, min_periods=4).min()
+    recent_pivot_low = price["low"].shift(1).rolling(4, min_periods=4).min()
     recent_stop_high = price["high"].shift(1).rolling(4, min_periods=4).max()
 
     frame = _join_without_overlaps(price, trend)
@@ -166,108 +128,100 @@ def build_continuation_candidates(
     frame = _join_without_overlaps(frame, macro_15m)
     frame["atr15"] = atr15
     frame["recent_pivot_high"] = recent_pivot_high
-    frame["recent_pivot_low"] = recent_pivot_low
     frame["recent_stop_low"] = recent_stop_low
+    frame["recent_pivot_low"] = recent_pivot_low
     frame["recent_stop_high"] = recent_stop_high
 
-    requested_sides = _normalize_requested_sides(sides)
     candidates: list[CandidateEvent] = []
     for ts, row in frame.iterrows():
         if pd.isna(row.get("atr15")):
             continue
+        ema50_gap = _numeric_or_nan(row.get("ema50_4h_gap"))
+        ema50_slope = _numeric_or_nan(row.get("ema50_4h_slope"))
+        ema200_slope = _numeric_or_nan(row.get("ema200_4h_slope"))
         trend_score = _numeric_or_nan(row.get("trend_score"))
         range_score = _numeric_or_nan(row.get("range_score"))
         stress_score = _numeric_or_nan(row.get("stress_score"))
-        macro_active = bool(row.get("veto_active", False))
-        event_type = row.get("veto_event_type") or "macro"
+        close_px = _numeric_or_nan(row.get("close"))
 
-        for side in requested_sides:
+        for side in run_sides:
             veto_reasons: list[str] = []
-            if require_crowding_veto and bool(row.get("veto_long" if side == "long" else "veto_short", False)):
+            veto_col = "veto_long" if side == "long" else "veto_short"
+            if require_crowding_veto and bool(row.get(veto_col, False)):
                 veto_reasons.append(f"crowding_veto_{side}")
-            if require_macro_veto and macro_active:
+            if require_macro_veto and bool(row.get("veto_active", False)):
+                event_type = row.get("veto_event_type") or "macro"
                 veto_reasons.append(f"macro_veto_{event_type}")
 
-            close_px = _numeric_or_nan(row.get("close"))
-            atr15_value = _numeric_or_nan(row.get("atr15"))
             if side == "long":
-                trigger_level = _numeric_or_nan(row.get("recent_pivot_high"))
-                stop_anchor = _numeric_or_nan(row.get("recent_stop_low"))
-                setup_age = _numeric_or_nan(row.get("breakout_age_1h"))
-                setup_impulse = _numeric_or_nan(row.get("impulse_atr_1h"))
-                setup_depth = _numeric_or_nan(row.get("pullback_depth_frac"))
-                dist_to_level = _numeric_or_nan(row.get("dist_to_breakout_level"))
-                dist_to_ema50 = _numeric_or_nan(row.get("dist_to_ema50_4h"))
+                if pd.isna(row.get("recent_pivot_high")) or pd.isna(row.get("recent_stop_low")):
+                    continue
                 conds = {
-                    "trend_gap_positive": _numeric_or_nan(row.get("ema50_4h_gap")) > 0,
-                    "ema50_slope_positive": _numeric_or_nan(row.get("ema50_4h_slope")) > 0,
-                    "ema200_slope_positive": _numeric_or_nan(row.get("ema200_4h_slope")) > 0,
-                    "breakout_recent": 0 <= setup_age <= 10,
-                    "impulse_valid": setup_impulse >= 1.0,
-                    "pullback_depth_valid": 0.20 <= setup_depth <= 0.60,
-                    "above_breakout_level": dist_to_level > -0.005,
-                    "above_ema50_4h": dist_to_ema50 > 0,
-                    "trigger_break": close_px > trigger_level,
+                    "trend_gap_positive": ema50_gap > 0,
+                    "ema50_slope_positive": ema50_slope > 0,
+                    "ema200_slope_positive": ema200_slope > 0,
+                    "breakout_recent": 0 <= _numeric_or_nan(row.get("breakout_age_1h")) <= 10,
+                    "impulse_valid": _numeric_or_nan(row.get("impulse_atr_1h")) >= 1.0,
+                    "pullback_depth_valid": 0.20 <= _numeric_or_nan(row.get("pullback_depth_frac")) <= 0.60,
+                    "above_breakout_level": _numeric_or_nan(row.get("dist_to_breakout_level")) > -0.005,
+                    "above_ema50_4h": _numeric_or_nan(row.get("dist_to_ema50_4h")) > 0,
+                    "trigger_break": close_px > _numeric_or_nan(row.get("recent_pivot_high")),
                 }
+                if require_regime_gate:
+                    conds["trend_regime"] = trend_score >= range_score
+                    conds["stress_ok"] = stress_score < 0.55
+                if require_micro_gate:
+                    conds["micro_gate"] = bool(row.get("gate_pass_long", False))
+                if require_macro_veto:
+                    conds["macro_window_clear"] = not bool(row.get("veto_active", False))
+                if veto_reasons or not all(conds.values()):
+                    continue
+                entry = float(row["close"])
+                base_stop = float(min(row["recent_stop_low"] - 0.25 * row["atr15"], entry - 0.50 * row["atr15"]))
+                if not np.isfinite(base_stop) or base_stop >= entry:
+                    continue
+                risk = (entry - base_stop) * stop_width_multiplier
+                stop = float(entry - risk)
+                tp = entry + target_r_multiple * risk
             else:
-                trigger_level = _numeric_or_nan(row.get("recent_pivot_low"))
-                stop_anchor = _numeric_or_nan(row.get("recent_stop_high"))
-                setup_age = _numeric_or_nan(row.get("breakdown_age_1h"))
-                setup_impulse = _numeric_or_nan(row.get("downside_impulse_atr_1h"))
-                setup_depth = _numeric_or_nan(row.get("rebound_depth_frac"))
-                raw_dist_to_level = _numeric_or_nan(row.get("dist_to_breakdown_level"))
-                raw_dist_to_ema50 = _numeric_or_nan(row.get("dist_to_ema50_4h"))
-                dist_to_level = -raw_dist_to_level
-                dist_to_ema50 = -raw_dist_to_ema50
+                if pd.isna(row.get("recent_pivot_low")) or pd.isna(row.get("recent_stop_high")):
+                    continue
                 conds = {
-                    "trend_gap_negative": _numeric_or_nan(row.get("ema50_4h_gap")) < 0,
-                    "ema50_slope_negative": _numeric_or_nan(row.get("ema50_4h_slope")) < 0,
-                    "ema200_slope_negative": _numeric_or_nan(row.get("ema200_4h_slope")) < 0,
-                    "breakdown_recent": 0 <= setup_age <= 10,
-                    "impulse_valid": setup_impulse >= 1.0,
-                    "rebound_depth_valid": 0.20 <= setup_depth <= 0.60,
-                    "below_breakdown_level": raw_dist_to_level < 0.005,
-                    "below_ema50_4h": raw_dist_to_ema50 < 0,
-                    "trigger_break": close_px < trigger_level,
+                    "trend_gap_negative": ema50_gap < 0,
+                    "ema50_slope_negative": ema50_slope < 0,
+                    "ema200_slope_negative": ema200_slope < 0,
+                    "breakdown_recent": 0 <= _numeric_or_nan(row.get("breakdown_age_1h")) <= 10,
+                    "downside_impulse_valid": _numeric_or_nan(row.get("downside_impulse_atr_1h")) >= 1.0,
+                    "bounce_depth_valid": 0.20 <= _numeric_or_nan(row.get("bounce_depth_frac")) <= 0.60,
+                    "below_breakdown_level": _numeric_or_nan(row.get("dist_to_breakdown_level")) > -0.005,
+                    "below_ema50_4h": _numeric_or_nan(row.get("dist_below_ema50_4h")) > 0,
+                    "trigger_break": close_px < _numeric_or_nan(row.get("recent_pivot_low")),
                 }
+                if require_regime_gate:
+                    conds["trend_regime"] = trend_score >= range_score
+                    conds["stress_ok"] = stress_score < 0.55
+                if require_micro_gate:
+                    conds["micro_gate"] = bool(row.get("gate_pass_short", False))
+                if require_macro_veto:
+                    conds["macro_window_clear"] = not bool(row.get("veto_active", False))
+                if veto_reasons or not all(conds.values()):
+                    continue
+                entry = float(row["close"])
+                base_stop = float(max(row["recent_stop_high"] + 0.25 * row["atr15"], entry + 0.50 * row["atr15"]))
+                if not np.isfinite(base_stop) or base_stop <= entry:
+                    continue
+                risk = (base_stop - entry) * stop_width_multiplier
+                stop = float(entry + risk)
+                tp = entry - target_r_multiple * risk
 
-            if require_regime_gate:
-                conds["trend_regime"] = trend_score >= range_score
-                conds["stress_ok"] = stress_score < 0.55
-            if require_micro_gate:
-                conds["micro_gate"] = _micro_gate_for_side(row, side)
-            if require_macro_veto:
-                conds["macro_window_clear"] = not macro_active
-
-            if veto_reasons or not all(conds.values()):
+            if not np.isfinite(stop) or risk <= 0:
                 continue
-
-            entry = float(row["close"])
-            if side == "long":
-                stop = float(min(stop_anchor - 0.25 * atr15_value, entry - 0.50 * atr15_value))
-                if not np.isfinite(stop) or stop >= entry:
-                    continue
-                risk = entry - stop
-                tp = entry + 2.0 * risk
-            else:
-                stop = float(max(stop_anchor + 0.25 * atr15_value, entry + 0.50 * atr15_value))
-                if not np.isfinite(stop) or stop <= entry:
-                    continue
-                risk = stop - entry
-                tp = entry - 2.0 * risk
-            target_r_multiple = 2.0
-            feature_payload = _continuation_feature_payload(
-                row,
-                side=side,
-                atr15_value=_optional_float(row.get("atr15")) or atr15_value,
-                setup_age=setup_age,
-                setup_impulse_atr=setup_impulse,
-                setup_depth_frac=setup_depth,
-                setup_dist_to_level=dist_to_level,
-                setup_dist_to_ema50=dist_to_ema50,
-            )
-            feature_payload["signal_risk"] = risk
-            feature_payload["signal_risk_pct"] = None if entry == 0 else (risk / entry)
+            feature_payload = {
+                "atr15": _optional_float(row.get("atr15")),
+                "signal_risk": _optional_float(risk),
+                "signal_risk_pct": _optional_float(risk / entry if entry > 0 else None),
+                "side_sign": 1.0 if side == "long" else -1.0,
+            }
             candidates.append(
                 CandidateEvent(
                     ts=int(ts.timestamp() * 1000),
@@ -276,8 +230,8 @@ def build_continuation_candidates(
                     module="continuation_v1",
                     side=side,
                     entry=entry,
-                    stop=stop,
-                    tp=tp,
+                    stop=float(stop),
+                    tp=float(tp),
                     target_r_multiple=target_r_multiple,
                     timeout_bars=timeout_bars,
                     rule_reasons=[name for name, ok in conds.items() if ok],
@@ -286,6 +240,7 @@ def build_continuation_candidates(
                 )
             )
     return candidates
+
 
 def build_stress_reversal_candidates(
     trade_bars: Iterable[PriceBar],
@@ -300,11 +255,12 @@ def build_stress_reversal_candidates(
     require_crowding_veto: bool = True,
     require_micro_gate: bool = True,
     require_macro_veto: bool = False,
-    sides: Iterable[str] | None = None,
+    sides: Sequence[str] | None = None,
 ) -> list[CandidateEvent]:
     price = _bars_to_frame(trade_bars)
     if price.empty:
         return []
+    run_sides = _normalize_sides(sides)
     regime = _align_feature_frame(regime_features, price.index)
     crowding = _align_feature_frame(crowding_features, price.index)
     micro_15m = _align_feature_frame(micro_features, price.index, resample_rule="15min")
@@ -312,15 +268,14 @@ def build_stress_reversal_candidates(
 
     atr15 = atr(price, 14)
     prior20_low = price["low"].shift(1).rolling(20, min_periods=20).min()
-    sweep_low = price["low"] < (prior20_low - 0.25 * atr15)
-    close_above_midpoint = price["close"] > ((price["high"] + price["low"]) / 2.0)
-    prior_reversal_bar_long = sweep_low.shift(1).eq(True) & close_above_midpoint.shift(1).eq(True)
-    local_swing_pivot_high = price["high"].shift(2).rolling(4, min_periods=4).max()
-
     prior20_high = price["high"].shift(1).rolling(20, min_periods=20).max()
-    sweep_high = price["high"] > (prior20_high + 0.25 * atr15)
+    close_above_midpoint = price["close"] > ((price["high"] + price["low"]) / 2.0)
     close_below_midpoint = price["close"] < ((price["high"] + price["low"]) / 2.0)
-    prior_reversal_bar_short = sweep_high.shift(1).eq(True) & close_below_midpoint.shift(1).eq(True)
+    long_sweep_low = price["low"] < (prior20_low - 0.25 * atr15)
+    short_sweep_high = price["high"] > (prior20_high + 0.25 * atr15)
+    prior_reversal_bar_long = long_sweep_low.shift(1).eq(True) & close_above_midpoint.shift(1).eq(True)
+    prior_reversal_bar_short = short_sweep_high.shift(1).eq(True) & close_below_midpoint.shift(1).eq(True)
+    local_swing_pivot_high = price["high"].shift(2).rolling(4, min_periods=4).max()
     local_swing_pivot_low = price["low"].shift(2).rolling(4, min_periods=4).min()
 
     frame = _join_without_overlaps(price, regime)
@@ -335,7 +290,6 @@ def build_stress_reversal_candidates(
     frame["local_swing_pivot_high"] = local_swing_pivot_high
     frame["local_swing_pivot_low"] = local_swing_pivot_low
 
-    requested_sides = _normalize_requested_sides(sides)
     candidates: list[CandidateEvent] = []
     for ts, row in frame.iterrows():
         if pd.isna(row.get("atr15")):
@@ -343,66 +297,65 @@ def build_stress_reversal_candidates(
         stress_score = _numeric_or_nan(row.get("stress_score"))
         trend_score = _numeric_or_nan(row.get("trend_score"))
         range_score = _numeric_or_nan(row.get("range_score"))
-        macro_active = bool(row.get("veto_active", False))
-        event_type = row.get("veto_event_type") or "macro"
         close_px = _numeric_or_nan(row.get("close"))
-        atr15_value = _numeric_or_nan(row.get("atr15"))
 
-        for side in requested_sides:
+        for side in run_sides:
             veto_reasons: list[str] = []
-            if require_crowding_veto and bool(row.get("veto_long" if side == "long" else "veto_short", False)):
+            veto_col = "veto_long" if side == "long" else "veto_short"
+            if require_crowding_veto and bool(row.get(veto_col, False)):
                 veto_reasons.append(f"crowding_veto_{side}")
-            if require_macro_veto and macro_active:
+            if require_macro_veto and bool(row.get("veto_active", False)):
+                event_type = row.get("veto_event_type") or "macro"
                 veto_reasons.append(f"macro_veto_{event_type}")
 
             if side == "long":
-                liq_z = _numeric_or_nan(row.get("liq_longs_z_1h"))
-                pivot = _numeric_or_nan(row.get("local_swing_pivot_high"))
+                liq_score = _numeric_or_nan(row.get("liq_longs_z_1h"))
                 conds = {
                     "stress_regime": stress_score > max(trend_score, range_score),
-                    "liquidation_stress": liq_z >= 3.0,
+                    "liquidation_stress": liq_score >= 3.0,
                     "prior_reversal_bar": bool(row.get("prior_reversal_bar_long", False)),
-                    "pivot_reclaim": close_px > pivot,
+                    "pivot_reclaim": close_px > _numeric_or_nan(row.get("local_swing_pivot_high")),
                 }
-            else:
-                liq_z = _numeric_or_nan(row.get("liq_shorts_z_1h"))
-                pivot = _numeric_or_nan(row.get("local_swing_pivot_low"))
-                conds = {
-                    "stress_regime": stress_score > max(trend_score, range_score),
-                    "liquidation_stress": liq_z >= 3.0,
-                    "prior_reversal_bar": bool(row.get("prior_reversal_bar_short", False)),
-                    "pivot_reclaim": close_px < pivot,
-                }
-            if require_micro_gate:
-                conds["micro_gate"] = _micro_gate_for_side(row, side)
-            if require_macro_veto:
-                conds["macro_window_clear"] = not macro_active
-            if veto_reasons or not all(conds.values()):
-                continue
-
-            entry = float(row["close"])
-            if side == "long":
-                stop = float(row["low"] - 0.20 * atr15_value)
+                if require_micro_gate:
+                    conds["micro_gate"] = bool(row.get("gate_pass_long", False))
+                if require_macro_veto:
+                    conds["macro_window_clear"] = not bool(row.get("veto_active", False))
+                if veto_reasons or not all(conds.values()):
+                    continue
+                entry = float(row["close"])
+                stop = float(row["low"] - 0.20 * row["atr15"])
                 if stop >= entry:
                     continue
                 risk = entry - stop
-                tp = entry + 1.5 * risk
+                target_r_multiple = 1.5
+                tp = entry + target_r_multiple * risk
             else:
-                stop = float(row["high"] + 0.20 * atr15_value)
+                liq_score = _numeric_or_nan(row.get("liq_shorts_z_1h"))
+                conds = {
+                    "stress_regime": stress_score > max(trend_score, range_score),
+                    "liquidation_stress": liq_score >= 3.0,
+                    "prior_reversal_bar": bool(row.get("prior_reversal_bar_short", False)),
+                    "pivot_breakdown": close_px < _numeric_or_nan(row.get("local_swing_pivot_low")),
+                }
+                if require_micro_gate:
+                    conds["micro_gate"] = bool(row.get("gate_pass_short", False))
+                if require_macro_veto:
+                    conds["macro_window_clear"] = not bool(row.get("veto_active", False))
+                if veto_reasons or not all(conds.values()):
+                    continue
+                entry = float(row["close"])
+                stop = float(row["high"] + 0.20 * row["atr15"])
                 if stop <= entry:
                     continue
                 risk = stop - entry
-                tp = entry - 1.5 * risk
-            target_r_multiple = 1.5
+                target_r_multiple = 1.5
+                tp = entry - target_r_multiple * risk
+
             feature_payload = {
+                "atr15": _optional_float(row.get("atr15")),
+                "signal_risk": _optional_float(risk),
+                "signal_risk_pct": _optional_float(risk / entry if entry > 0 else None),
                 "side_sign": 1.0 if side == "long" else -1.0,
-                "stress_score": _optional_float(row.get("stress_score")),
-                "liq_stress_z_1h": _optional_float(liq_z),
-                "ofi_60s": _optional_float(row.get("ofi_60s")),
-                "veto_active": bool(row.get("veto_active", False)) if pd.notna(row.get("veto_active")) else False,
-                "signal_risk": risk,
-                "signal_risk_pct": None if entry == 0 else (risk / entry),
-                "atr15": atr15_value,
             }
             candidates.append(
                 CandidateEvent(
@@ -412,8 +365,8 @@ def build_stress_reversal_candidates(
                     module="stress_reversal_v0",
                     side=side,
                     entry=entry,
-                    stop=stop,
-                    tp=tp,
+                    stop=float(stop),
+                    tp=float(tp),
                     target_r_multiple=target_r_multiple,
                     timeout_bars=timeout_bars,
                     rule_reasons=[name for name, ok in conds.items() if ok],

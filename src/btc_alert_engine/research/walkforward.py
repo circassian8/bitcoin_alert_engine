@@ -16,6 +16,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from btc_alert_engine.config import default_reports_root, load_research_registry
+from btc_alert_engine.provenance import report_provenance
 from btc_alert_engine.research.execution import build_raw_execution_tape
 from btc_alert_engine.research.experiments import build_experiment_event_frame, feature_columns_for_experiment
 
@@ -188,6 +189,8 @@ class ExperimentRunBundle:
     outer_results: list[EvaluationResult]
     final_results: list[EvaluationResult]
     selected_model: str | None
+    candidate_side_counts: dict[str, int] | None = None
+    label_side_counts: dict[str, int] | None = None
 
 
 def _ensure_utc(value: Any) -> pd.Timestamp:
@@ -453,11 +456,14 @@ def _max_concurrent_positions(frame: pd.DataFrame) -> int:
 def _apply_portfolio_policy(
     selected: pd.DataFrame,
     *,
+    mode: str,
     selection_policy: str,
     cooldown_minutes: int,
 ) -> pd.DataFrame:
     if selected.empty:
         return selected.copy()
+    if mode == "event_level":
+        return selected.sort_values(["ts", "p"], ascending=[True, False]).reset_index(drop=True)
     if "entry_ts" not in selected.columns or "exit_ts" not in selected.columns:
         return selected.sort_values(["ts", "p"], ascending=[True, False]).reset_index(drop=True)
 
@@ -470,20 +476,15 @@ def _apply_portfolio_policy(
     if selection_policy == "highest_probability":
         ordered = working.sort_values(["entry_ts", "ts", "p"], ascending=[True, True, False]).reset_index(drop=True)
         chosen_rows: list[pd.Series] = []
-        i = 0
-        while i < len(ordered):
-            cluster = [ordered.iloc[i]]
-            cluster_end = int(ordered.iloc[i]["exit_ts"]) + cooldown_ms
-            j = i + 1
-            while j < len(ordered) and int(ordered.iloc[j]["entry_ts"]) < cluster_end:
-                row = ordered.iloc[j]
-                cluster.append(row)
-                cluster_end = max(cluster_end, int(row["exit_ts"]) + cooldown_ms)
-                j += 1
-            cluster_frame = pd.DataFrame(cluster)
+        remaining = ordered
+        while not remaining.empty:
+            seed = remaining.iloc[0]
+            seed_end = int(seed["exit_ts"]) + cooldown_ms
+            cluster_frame = remaining[remaining["entry_ts"] < seed_end].copy()
             chosen = cluster_frame.sort_values(["p", "entry_ts", "ts"], ascending=[False, True, True]).iloc[0]
             chosen_rows.append(chosen)
-            i = j
+            next_free_ts = int(chosen["exit_ts"]) + cooldown_ms
+            remaining = remaining[remaining["entry_ts"] >= next_free_ts].reset_index(drop=True)
         return pd.DataFrame(chosen_rows).sort_values(["ts", "p"], ascending=[True, False]).reset_index(drop=True)
 
     ordered = working.sort_values(["entry_ts", "ts", "p"], ascending=[True, True, False]).reset_index(drop=True)
@@ -534,6 +535,7 @@ def threshold_for_budget(
     budget_per_week: int,
     window_start: pd.Timestamp,
     window_end: pd.Timestamp,
+    portfolio_mode: str,
     selection_policy: str,
     cooldown_minutes: int,
 ) -> float:
@@ -550,6 +552,7 @@ def threshold_for_budget(
         selected = working[working["p"] >= threshold].sort_values("ts")
         portfolio_selected = _apply_portfolio_policy(
             selected,
+            mode=portfolio_mode,
             selection_policy=selection_policy,
             cooldown_minutes=cooldown_minutes,
         )
@@ -620,6 +623,7 @@ def evaluate_predictions(
     generator: str,
     model_key: str,
     split: SplitSpec,
+    portfolio_mode: str,
     selection_policy: str,
     cooldown_minutes: int,
 ) -> EvaluationResult:
@@ -628,6 +632,7 @@ def evaluate_predictions(
     event_selected = working[working["p"] >= threshold].sort_values("ts")
     portfolio_selected = _apply_portfolio_policy(
         event_selected,
+        mode=portfolio_mode,
         selection_policy=selection_policy,
         cooldown_minutes=cooldown_minutes,
     )
@@ -693,6 +698,7 @@ def run_split(
     budgets: list[int],
     experiment_id: str,
     generator: str,
+    portfolio_mode: str,
     selection_policy: str,
     cooldown_minutes: int,
 ) -> list[EvaluationResult]:
@@ -710,6 +716,7 @@ def run_split(
             budget_per_week=budget,
             window_start=split.calibrate_start,
             window_end=split.calibrate_end,
+            portfolio_mode=portfolio_mode,
             selection_policy=selection_policy,
             cooldown_minutes=cooldown_minutes,
         )
@@ -723,6 +730,7 @@ def run_split(
                 generator=generator,
                 model_key=model_key,
                 split=split,
+                portfolio_mode=portfolio_mode,
                 selection_policy=selection_policy,
                 cooldown_minutes=cooldown_minutes,
             )
@@ -754,13 +762,16 @@ def _primary_budget(goal: dict[str, Any], promotion_rules: dict[str, Any] | None
     return int(goal.get("production_budget_per_week", 3))
 
 
-def _portfolio_settings(goal: dict[str, Any]) -> tuple[str, int]:
+def _portfolio_settings(goal: dict[str, Any]) -> tuple[str, str, int]:
     config = goal.get("portfolio_evaluation", {}) or {}
+    mode = str(config.get("mode", "one_position_at_a_time"))
     selection_policy = str(config.get("selection_policy", "first_signal"))
     cooldown_minutes = int(config.get("cooldown_minutes", 0))
+    if mode not in {"one_position_at_a_time", "event_level"}:
+        mode = "one_position_at_a_time"
     if selection_policy not in {"first_signal", "highest_probability"}:
         selection_policy = "first_signal"
-    return selection_policy, cooldown_minutes
+    return mode, selection_policy, cooldown_minutes
 
 
 def _best_model_for_experiment(summary: pd.DataFrame, experiment_id: str, primary_budget: int) -> str | None:
@@ -962,12 +973,12 @@ def _markdown_report(
     selected_models: dict[str, str | None],
 ) -> str:
     primary_budget = _primary_budget(registry.goal, registry.model_dump().get("promotion_rules", {}))
-    selection_policy, cooldown_minutes = _portfolio_settings(registry.goal)
+    portfolio_mode, selection_policy, cooldown_minutes = _portfolio_settings(registry.goal)
     lines = [
         f"# Walk-forward promotion report: {registry.program['id']}",
         "",
         f"Primary budget: **{primary_budget} alerts/week**",
-        f"Portfolio evaluation: **{selection_policy}**, cooldown **{cooldown_minutes} min**",
+        f"Portfolio evaluation: **{portfolio_mode} / {selection_policy}**, cooldown **{cooldown_minutes} min**",
         "",
         "## Selected models",
         "",
@@ -1053,7 +1064,7 @@ def run_walkforward_experiments(
 
     budgets = list(registry.goal.get("alert_budgets_per_week", [1, 3, 7]))
     calibration_order = registry.models.get("calibration", {}).get("order", ["isotonic", "sigmoid"])
-    selection_policy, cooldown_minutes = _portfolio_settings(registry.goal)
+    portfolio_mode, selection_policy, cooldown_minutes = _portfolio_settings(registry.goal)
 
     selected_experiments = [exp for exp in registry.experiments if experiment_ids is None or exp["id"] in experiment_ids]
 
@@ -1072,7 +1083,7 @@ def run_walkforward_experiments(
             skip_missing=skip_missing,
         )
         if dataset.skip_reason or dataset.frame.empty:
-            bundles.append(ExperimentRunBundle(dataset.experiment_id, dataset.generator, dataset.blocks, len(dataset.frame), dataset.skip_reason or "empty_frame", [], [], None))
+            bundles.append(ExperimentRunBundle(dataset.experiment_id, dataset.generator, dataset.blocks, len(dataset.frame), dataset.skip_reason or "empty_frame", [], [], None, {}, {}))
             continue
         feature_columns = feature_columns_for_experiment(dataset.frame, dataset.blocks)
         outer_splits = make_outer_splits(dataset.frame, registry.validation)
@@ -1092,6 +1103,7 @@ def run_walkforward_experiments(
                         budgets=budgets,
                         experiment_id=dataset.experiment_id,
                         generator=dataset.generator,
+                        portfolio_mode=portfolio_mode,
                         selection_policy=selection_policy,
                         cooldown_minutes=cooldown_minutes,
                     )
@@ -1106,13 +1118,16 @@ def run_walkforward_experiments(
                     budgets=budgets,
                     experiment_id=dataset.experiment_id,
                     generator=dataset.generator,
+                    portfolio_mode=portfolio_mode,
                     selection_policy=selection_policy,
                     cooldown_minutes=cooldown_minutes,
                 )
             )
         all_results.extend(outer_results)
         all_results.extend(final_results)
-        bundles.append(ExperimentRunBundle(dataset.experiment_id, dataset.generator, dataset.blocks, len(dataset.frame), None, outer_results, final_results, None))
+        candidate_side_counts = dict(pd.Series([c.side for c in dataset.candidates]).value_counts().sort_index()) if dataset.candidates else {}
+        label_side_counts = dict(dataset.labels["side"].value_counts().sort_index()) if not dataset.labels.empty and "side" in dataset.labels.columns else {}
+        bundles.append(ExperimentRunBundle(dataset.experiment_id, dataset.generator, dataset.blocks, len(dataset.frame), None, outer_results, final_results, None, candidate_side_counts, label_side_counts))
 
     results_frame = _result_frame(all_results)
     summary_frame = _summarize_results(all_results)
@@ -1127,11 +1142,25 @@ def run_walkforward_experiments(
 
     promotion_frame = _promotion_report(registry, summary_frame, results_frame, selected_models)
 
+    project_root = Path(registry_path).resolve().parent
+    contracts_path = project_root / "feature_contracts.yaml"
+    provenance = report_provenance(
+        project_root=project_root,
+        data_dir=data_root,
+        registry_path=registry_path,
+        contracts_path=contracts_path if contracts_path.exists() else None,
+    )
+
     manifest = {
+        "provenance": provenance,
         "program_id": registry.program["id"],
         "symbol": symbol,
         "available_models": available_models,
-        "portfolio_evaluation": {"selection_policy": selection_policy, "cooldown_minutes": cooldown_minutes},
+        "portfolio_evaluation": {
+            "mode": portfolio_mode,
+            "selection_policy": selection_policy,
+            "cooldown_minutes": cooldown_minutes,
+        },
         "experiments": [
             {
                 "experiment_id": bundle.experiment_id,
@@ -1140,6 +1169,8 @@ def run_walkforward_experiments(
                 "dataset_rows": bundle.dataset_rows,
                 "skip_reason": bundle.skip_reason,
                 "selected_model": selected_models.get(bundle.experiment_id),
+                "candidate_side_counts": bundle.candidate_side_counts or {},
+                "label_side_counts": bundle.label_side_counts or {},
             }
             for bundle in bundles
         ],

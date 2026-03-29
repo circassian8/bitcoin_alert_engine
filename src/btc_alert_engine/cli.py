@@ -449,7 +449,7 @@ async def _run_async(args: argparse.Namespace) -> None:
         )
         artifacts_dir = write_verification_artifacts(report, output_dir)
         print(f"verification_dir={artifacts_dir} errors={len(report.errors)} warnings={len(report.warnings)}")
-        if args.strict and report.errors:
+        if args.strict and report.strict_failures:
             raise SystemExit(1)
         return
 

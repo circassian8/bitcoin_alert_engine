@@ -48,16 +48,22 @@ def load_alerts(csv_path: Path) -> pd.DataFrame:
 def build_summary_cards(frame: pd.DataFrame, title: str) -> alt.Chart:
     precision = (frame["outcome"] == "tp").mean()
     timeout_rate = (frame["outcome"] == "timeout").mean()
-    cards = pd.DataFrame(
-        [
-            {"metric": "Alerts", "value": _format_metric(len(frame), kind="int"), "order": 0},
-            {"metric": "Precision", "value": _format_metric(precision, kind="pct"), "order": 1},
-            {"metric": "Expectancy", "value": _format_metric(frame["realized_r"].mean(), kind="r"), "order": 2},
-            {"metric": "Worst DD", "value": _format_metric(frame["drawdown_r"].max(), kind="r"), "order": 3},
-            {"metric": "Avg Hold", "value": _format_metric(frame["holding_minutes"].median(), kind="num") + " min", "order": 4},
-            {"metric": "Timeout Rate", "value": _format_metric(timeout_rate, kind="pct"), "order": 5},
-        ]
-    )
+    rows = [
+        {"metric": "Alerts", "value": _format_metric(len(frame), kind="int"), "order": 0},
+        {"metric": "Precision", "value": _format_metric(precision, kind="pct"), "order": 1},
+        {"metric": "Expectancy", "value": _format_metric(frame["realized_r"].mean(), kind="r"), "order": 2},
+        {"metric": "Worst DD", "value": _format_metric(frame["drawdown_r"].max(), kind="r"), "order": 3},
+        {"metric": "Avg Hold", "value": _format_metric(frame["holding_minutes"].median(), kind="num") + " min", "order": 4},
+        {"metric": "Timeout Rate", "value": _format_metric(timeout_rate, kind="pct"), "order": 5},
+    ]
+    if "pnl_usd" in frame.columns:
+        rows.extend(
+            [
+                {"metric": "Total PnL", "value": f"${frame['pnl_usd'].sum():,.2f}", "order": 6},
+                {"metric": "Avg PnL", "value": f"${frame['pnl_usd'].mean():,.2f}", "order": 7},
+            ]
+        )
+    cards = pd.DataFrame(rows)
     base = alt.Chart(cards).encode(
         x=alt.X("order:O", axis=None, sort=list(cards["order"])),
     )
@@ -83,19 +89,27 @@ def build_summary_cards(frame: pd.DataFrame, title: str) -> alt.Chart:
 
 
 def build_equity_chart(frame: pd.DataFrame) -> alt.Chart:
+    tooltips = [
+        alt.Tooltip("ts_dt:T", title="Time"),
+        alt.Tooltip("candidate_id:N", title="Candidate"),
+        alt.Tooltip("outcome_label:N", title="Outcome"),
+        alt.Tooltip("realized_r:Q", title="Realized R", format=".3f"),
+        alt.Tooltip("cumulative_r:Q", title="Cumulative R", format=".3f"),
+        alt.Tooltip("p:Q", title="Probability", format=".3f"),
+        alt.Tooltip("holding_minutes:Q", title="Hold min", format=".0f"),
+        alt.Tooltip("executed_entry:Q", title="Entry", format=".2f"),
+        alt.Tooltip("executed_exit:Q", title="Exit", format=".2f"),
+    ]
+    if "pnl_usd" in frame.columns:
+        tooltips.extend(
+            [
+                alt.Tooltip("pnl_usd:Q", title="Trade PnL", format=",.2f"),
+                alt.Tooltip("cumulative_pnl_usd:Q", title="Cum PnL", format=",.2f"),
+            ]
+        )
     base = alt.Chart(frame).encode(
         x=alt.X("ts_dt:T", title="Trade time"),
-        tooltip=[
-            alt.Tooltip("ts_dt:T", title="Time"),
-            alt.Tooltip("candidate_id:N", title="Candidate"),
-            alt.Tooltip("outcome_label:N", title="Outcome"),
-            alt.Tooltip("realized_r:Q", title="Realized R", format=".3f"),
-            alt.Tooltip("cumulative_r:Q", title="Cumulative R", format=".3f"),
-            alt.Tooltip("p:Q", title="Probability", format=".3f"),
-            alt.Tooltip("holding_minutes:Q", title="Hold min", format=".0f"),
-            alt.Tooltip("executed_entry:Q", title="Entry", format=".2f"),
-            alt.Tooltip("executed_exit:Q", title="Exit", format=".2f"),
-        ],
+        tooltip=tooltips,
     )
     line = base.mark_line(color="#1f4b99", strokeWidth=2).encode(
         y=alt.Y("cumulative_r:Q", title="Cumulative realized R"),
@@ -162,6 +176,15 @@ def build_monthly_chart(frame: pd.DataFrame) -> alt.Chart:
 
 
 def build_probability_chart(frame: pd.DataFrame) -> alt.Chart:
+    tooltips = [
+        alt.Tooltip("ts_dt:T", title="Time"),
+        alt.Tooltip("candidate_id:N", title="Candidate"),
+        alt.Tooltip("p:Q", title="Probability", format=".3f"),
+        alt.Tooltip("realized_r:Q", title="Realized R", format=".3f"),
+        alt.Tooltip("holding_minutes:Q", title="Hold min", format=".0f"),
+    ]
+    if "pnl_usd" in frame.columns:
+        tooltips.append(alt.Tooltip("pnl_usd:Q", title="Trade PnL", format=",.2f"))
     return (
         alt.Chart(frame)
         .mark_circle(size=90, opacity=0.85)
@@ -176,13 +199,7 @@ def build_probability_chart(frame: pd.DataFrame) -> alt.Chart:
                     range=[OUTCOME_COLORS["tp"], OUTCOME_COLORS["sl"], OUTCOME_COLORS["timeout"]],
                 ),
             ),
-            tooltip=[
-                alt.Tooltip("ts_dt:T", title="Time"),
-                alt.Tooltip("candidate_id:N", title="Candidate"),
-                alt.Tooltip("p:Q", title="Probability", format=".3f"),
-                alt.Tooltip("realized_r:Q", title="Realized R", format=".3f"),
-                alt.Tooltip("holding_minutes:Q", title="Hold min", format=".0f"),
-            ],
+            tooltip=tooltips,
         )
         .properties(height=220, title="Probability vs Outcome")
     )
@@ -217,7 +234,24 @@ def build_dashboard(frame: pd.DataFrame, *, title: str) -> alt.Chart:
     cards = build_summary_cards(frame, title)
     top = build_equity_chart(frame) & build_drawdown_chart(frame)
     bottom = build_monthly_chart(frame) | build_probability_chart(frame) | build_holding_chart(frame)
-    dashboard = alt.vconcat(cards, top, bottom, spacing=18).resolve_scale(color="shared")
+    charts: list[alt.Chart] = [cards, top, bottom]
+    if "cumulative_pnl_usd" in frame.columns:
+        pnl_chart = (
+            alt.Chart(frame)
+            .mark_line(point=True, color="#805ad5")
+            .encode(
+                x=alt.X("ts_dt:T", title="Trade time"),
+                y=alt.Y("cumulative_pnl_usd:Q", title="Cumulative PnL (USD)"),
+                tooltip=[
+                    alt.Tooltip("ts_dt:T", title="Time"),
+                    alt.Tooltip("pnl_usd:Q", title="Trade PnL", format=",.2f"),
+                    alt.Tooltip("cumulative_pnl_usd:Q", title="Cum PnL", format=",.2f"),
+                ],
+            )
+            .properties(height=220, title="Cumulative PnL")
+        )
+        charts.append(pnl_chart)
+    dashboard = alt.vconcat(*charts, spacing=18).resolve_scale(color="shared")
     return dashboard.configure_view(stroke=None).configure_axis(
         labelColor="#2d3748",
         titleColor="#1a202c",

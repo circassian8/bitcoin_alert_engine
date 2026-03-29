@@ -2,7 +2,7 @@ program:
   id: btc_bybit_alert_engine_smoke_symmetric_v1
   version: 1
   description: BTC-only smoke registry tuned for sparse real-data pilot runs on the
-    Bybit-native alert engine with mirrored long+short continuation/reversal support
+    Bybit-native alert engine with mirrored long/short continuation and reversal candidates
 execution:
   venue: bybit
   symbol: BTCUSDT
@@ -112,9 +112,7 @@ pit_policy:
 candidate_generators:
   continuation_v1:
     enabled: true
-    side:
-    - long
-    - short
+    side: long
     rules:
       regime:
       - close_4h > ema200_4h
@@ -131,9 +129,7 @@ candidate_generators:
   stress_reversal_v0:
     enabled: true
     live_mode: log_only
-    side:
-    - long
-    - short
+    side: long
     rules:
       stress:
       - atr_pctile_90d >= 95 or liq_notional_1h_z >= 3 or abs(funding_z_7d) >= 3

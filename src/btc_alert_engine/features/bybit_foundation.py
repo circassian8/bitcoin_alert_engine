@@ -52,96 +52,6 @@ def load_micro_buckets(paths: Iterable[str]) -> list[MicroBucket1s]:
     return [MicroBucket1s.model_validate(record) for record in iter_json_records(paths)]
 
 
-def _breakout_state_1h(bars_1h: pd.DataFrame, atr14_1h: pd.Series, *, side: str) -> pd.DataFrame:
-    close_1h = bars_1h["close"]
-    if side == "long":
-        trigger_level = bars_1h["high"].shift(1).rolling(20, min_periods=20).max()
-        trigger_flag = close_1h > trigger_level
-    else:
-        trigger_level = bars_1h["low"].shift(1).rolling(20, min_periods=20).min()
-        trigger_flag = close_1h < trigger_level
-
-    age_vals: list[float] = []
-    impulse_vals: list[float] = []
-    depth_vals: list[float] = []
-    pullback_bars_vals: list[float] = []
-    level_vals: list[float] = []
-
-    active_idx: int | None = None
-    active_level = float("nan")
-    impulse = float("nan")
-    extreme_since_trigger = float("nan")
-    bars_since_extreme = float("nan")
-
-    for i, (_, row) in enumerate(bars_1h.iterrows()):
-        level = float(trigger_level.iloc[i]) if not math.isnan(float(trigger_level.iloc[i])) else float("nan")
-        if bool(trigger_flag.iloc[i]) and not math.isnan(level):
-            active_idx = i
-            active_level = level
-            current_atr = float(atr14_1h.iloc[i]) if not math.isnan(float(atr14_1h.iloc[i])) else float("nan")
-            if current_atr and not math.isnan(current_atr):
-                if side == "long":
-                    impulse = (float(row["close"]) - active_level) / current_atr
-                    extreme_since_trigger = float(row["high"])
-                else:
-                    impulse = (active_level - float(row["close"])) / current_atr
-                    extreme_since_trigger = float(row["low"])
-            else:
-                impulse = float("nan")
-                extreme_since_trigger = float(row["high"] if side == "long" else row["low"])
-            bars_since_extreme = 0.0
-        elif active_idx is not None:
-            age = i - active_idx
-            if age > 10:
-                active_idx = None
-                active_level = float("nan")
-                impulse = float("nan")
-                extreme_since_trigger = float("nan")
-                bars_since_extreme = float("nan")
-            else:
-                current_extreme = float(row["high"] if side == "long" else row["low"])
-                if (side == "long" and current_extreme >= extreme_since_trigger) or (side == "short" and current_extreme <= extreme_since_trigger):
-                    extreme_since_trigger = current_extreme
-                    bars_since_extreme = 0.0
-                else:
-                    bars_since_extreme = 0.0 if math.isnan(bars_since_extreme) else bars_since_extreme + 1.0
-
-        if active_idx is None:
-            age_vals.append(float("nan"))
-            impulse_vals.append(float("nan"))
-            depth_vals.append(float("nan"))
-            pullback_bars_vals.append(float("nan"))
-            level_vals.append(float("nan"))
-            continue
-
-        age_vals.append(float(i - active_idx))
-        impulse_vals.append(impulse)
-        level_vals.append(active_level)
-        if side == "long":
-            denom = max(extreme_since_trigger - active_level, EPS)
-            depth = max(extreme_since_trigger - float(row["close"]), 0.0) / denom
-        else:
-            denom = max(active_level - extreme_since_trigger, EPS)
-            depth = max(float(row["close"]) - extreme_since_trigger, 0.0) / denom
-        depth_vals.append(depth)
-        pullback_bars_vals.append(bars_since_extreme)
-
-    result = pd.DataFrame(index=bars_1h.index)
-    if side == "long":
-        result["breakout_age_1h"] = age_vals
-        result["impulse_atr_1h"] = impulse_vals
-        result["pullback_depth_frac"] = depth_vals
-        result["pullback_bars"] = pullback_bars_vals
-        result["breakout_level"] = level_vals
-    else:
-        result["breakdown_age_1h"] = age_vals
-        result["downside_impulse_atr_1h"] = impulse_vals
-        result["rebound_depth_frac"] = depth_vals
-        result["rebound_bars"] = pullback_bars_vals
-        result["breakdown_level"] = level_vals
-    return result
-
-
 def _trend_feature_frame(trade_bars: Iterable[PriceBar]) -> pd.DataFrame:
     trade_15m = _bars_to_frame(trade_bars)
     if trade_15m.empty:
@@ -150,13 +60,12 @@ def _trend_feature_frame(trade_bars: Iterable[PriceBar]) -> pd.DataFrame:
     bars_1h = resample_ohlcv(trade_15m, "1h")
     bars_4h = resample_ohlcv(trade_15m, "4h")
 
-    # 4h trend features
     close_4h = bars_4h["close"]
     ema50_4h = ema(close_4h, 50)
     ema200_4h = ema(close_4h, 200)
     atr14_4h = atr(bars_4h, 14)
     adx14_4h = adx(bars_4h, 14)
-    atr_pctile_90d = rolling_percentile_of_last(atr14_4h, window=90 * 6)  # 90d of 4h bars
+    atr_pctile_90d = rolling_percentile_of_last(atr14_4h, window=90 * 6)
 
     four_h = pd.DataFrame(index=bars_4h.index)
     four_h["ret_4h_6"] = close_4h.pct_change(6)
@@ -167,22 +76,136 @@ def _trend_feature_frame(trade_bars: Iterable[PriceBar]) -> pd.DataFrame:
     four_h["atr_pctile_90d"] = atr_pctile_90d
     four_h["ema50_4h"] = ema50_4h
 
-    # 1h breakout / pullback state
     close_1h = bars_1h["close"]
     atr14_1h = atr(bars_1h, 14)
+    prior20_high = bars_1h["high"].shift(1).rolling(20, min_periods=20).max()
+    prior20_low = bars_1h["low"].shift(1).rolling(20, min_periods=20).min()
+    breakout_flag = close_1h > prior20_high
+    breakdown_flag = close_1h < prior20_low
+
     one_h = pd.DataFrame(index=bars_1h.index)
     one_h["ret_1h_4"] = close_1h.pct_change(4)
-    one_h = one_h.join(_breakout_state_1h(bars_1h, atr14_1h, side="long"), how="left")
-    one_h = one_h.join(_breakout_state_1h(bars_1h, atr14_1h, side="short"), how="left")
 
-    # Join onto 15m close timeline using last fully closed higher timeframe bar.
+    breakout_age: list[float] = []
+    impulse_atr: list[float] = []
+    pullback_depth_frac: list[float] = []
+    pullback_bars: list[float] = []
+    breakout_level_vals: list[float] = []
+
+    breakdown_age: list[float] = []
+    downside_impulse_atr: list[float] = []
+    bounce_depth_frac: list[float] = []
+    bounce_bars: list[float] = []
+    breakdown_level_vals: list[float] = []
+
+    active_breakout_idx: int | None = None
+    breakout_level = float("nan")
+    long_impulse = float("nan")
+    high_since_breakout = float("nan")
+    bars_since_high = float("nan")
+
+    active_breakdown_idx: int | None = None
+    breakdown_level = float("nan")
+    short_impulse = float("nan")
+    low_since_breakdown = float("nan")
+    bars_since_low = float("nan")
+
+    for i, (_, row) in enumerate(bars_1h.iterrows()):
+        current_atr = float(atr14_1h.iloc[i]) if not math.isnan(float(atr14_1h.iloc[i])) else float("nan")
+
+        if bool(breakout_flag.iloc[i]) and not math.isnan(float(prior20_high.iloc[i])):
+            active_breakout_idx = i
+            breakout_level = float(prior20_high.iloc[i])
+            long_impulse = ((float(row["close"]) - breakout_level) / current_atr) if current_atr and not math.isnan(current_atr) else float("nan")
+            high_since_breakout = float(row["high"])
+            bars_since_high = 0.0
+        elif active_breakout_idx is not None:
+            age = i - active_breakout_idx
+            if age > 10:
+                active_breakout_idx = None
+                breakout_level = float("nan")
+                long_impulse = float("nan")
+                high_since_breakout = float("nan")
+                bars_since_high = float("nan")
+            else:
+                if float(row["high"]) >= high_since_breakout:
+                    high_since_breakout = float(row["high"])
+                    bars_since_high = 0.0
+                else:
+                    bars_since_high = 0.0 if math.isnan(bars_since_high) else bars_since_high + 1.0
+
+        if bool(breakdown_flag.iloc[i]) and not math.isnan(float(prior20_low.iloc[i])):
+            active_breakdown_idx = i
+            breakdown_level = float(prior20_low.iloc[i])
+            short_impulse = ((breakdown_level - float(row["close"])) / current_atr) if current_atr and not math.isnan(current_atr) else float("nan")
+            low_since_breakdown = float(row["low"])
+            bars_since_low = 0.0
+        elif active_breakdown_idx is not None:
+            age = i - active_breakdown_idx
+            if age > 10:
+                active_breakdown_idx = None
+                breakdown_level = float("nan")
+                short_impulse = float("nan")
+                low_since_breakdown = float("nan")
+                bars_since_low = float("nan")
+            else:
+                if float(row["low"]) <= low_since_breakdown:
+                    low_since_breakdown = float(row["low"])
+                    bars_since_low = 0.0
+                else:
+                    bars_since_low = 0.0 if math.isnan(bars_since_low) else bars_since_low + 1.0
+
+        if active_breakout_idx is None:
+            breakout_age.append(float("nan"))
+            impulse_atr.append(float("nan"))
+            pullback_depth_frac.append(float("nan"))
+            pullback_bars.append(float("nan"))
+            breakout_level_vals.append(float("nan"))
+        else:
+            age = float(i - active_breakout_idx)
+            breakout_age.append(age)
+            impulse_atr.append(long_impulse)
+            breakout_level_vals.append(breakout_level)
+            denom = max(high_since_breakout - breakout_level, EPS)
+            pullback_depth = max(high_since_breakout - float(row["close"]), 0.0) / denom
+            pullback_depth_frac.append(pullback_depth)
+            pullback_bars.append(bars_since_high)
+
+        if active_breakdown_idx is None:
+            breakdown_age.append(float("nan"))
+            downside_impulse_atr.append(float("nan"))
+            bounce_depth_frac.append(float("nan"))
+            bounce_bars.append(float("nan"))
+            breakdown_level_vals.append(float("nan"))
+        else:
+            age = float(i - active_breakdown_idx)
+            breakdown_age.append(age)
+            downside_impulse_atr.append(short_impulse)
+            breakdown_level_vals.append(breakdown_level)
+            denom = max(breakdown_level - low_since_breakdown, EPS)
+            bounce_depth = max(float(row["close"]) - low_since_breakdown, 0.0) / denom
+            bounce_depth_frac.append(bounce_depth)
+            bounce_bars.append(bars_since_low)
+
+    one_h["breakout_age_1h"] = breakout_age
+    one_h["impulse_atr_1h"] = impulse_atr
+    one_h["pullback_depth_frac"] = pullback_depth_frac
+    one_h["pullback_bars"] = pullback_bars
+    one_h["breakout_level"] = breakout_level_vals
+    one_h["breakdown_age_1h"] = breakdown_age
+    one_h["downside_impulse_atr_1h"] = downside_impulse_atr
+    one_h["bounce_depth_frac"] = bounce_depth_frac
+    one_h["bounce_bars"] = bounce_bars
+    one_h["breakdown_level"] = breakdown_level_vals
+
     trend = pd.DataFrame(index=trade_15m.index)
     trend["ret_15m_1"] = trade_15m["close"].pct_change(1)
     trend = trend.join(one_h.reindex(trade_15m.index, method="ffill"), how="left")
     trend = trend.join(four_h.reindex(trade_15m.index, method="ffill"), how="left")
     trend["dist_to_breakout_level"] = (trade_15m["close"] - trend["breakout_level"]) / trade_15m["close"].replace(0, np.nan)
-    trend["dist_to_breakdown_level"] = (trade_15m["close"] - trend["breakdown_level"]) / trade_15m["close"].replace(0, np.nan)
     trend["dist_to_ema50_4h"] = (trade_15m["close"] - trend["ema50_4h"]) / trade_15m["close"].replace(0, np.nan)
+    trend["dist_to_breakdown_level"] = (trend["breakdown_level"] - trade_15m["close"]) / trade_15m["close"].replace(0, np.nan)
+    trend["dist_below_ema50_4h"] = (trend["ema50_4h"] - trade_15m["close"]) / trade_15m["close"].replace(0, np.nan)
     trend["symbol"] = "BTCUSDT"
     return trend[[
         "ret_15m_1",
@@ -198,13 +221,15 @@ def _trend_feature_frame(trade_bars: Iterable[PriceBar]) -> pd.DataFrame:
         "pullback_depth_frac",
         "pullback_bars",
         "dist_to_breakout_level",
+        "dist_to_ema50_4h",
         "breakdown_age_1h",
         "downside_impulse_atr_1h",
-        "rebound_depth_frac",
-        "rebound_bars",
+        "bounce_depth_frac",
+        "bounce_bars",
         "dist_to_breakdown_level",
-        "dist_to_ema50_4h",
+        "dist_below_ema50_4h",
     ]]
+
 
 def build_trend_features(trade_bars: Iterable[PriceBar], *, symbol: str) -> list[TrendFeatureSnapshot]:
     frame = _trend_feature_frame(trade_bars)
@@ -481,23 +506,18 @@ def build_micro_features(micro_buckets: Iterable[MicroBucket1s], *, symbol: str)
         & (out["spread_z"] < 1.5)
         & (out["vwap_mid_dev_30s_z"].abs() < 2)
     )
-    out["gate_pass"] = out["gate_pass_long"]
 
     snapshots: list[MicroFeatureSnapshot] = []
     for ts, row in out.iterrows():
-        payload = {
-            k: (None if pd.isna(v) else float(v))
-            for k, v in row.items()
-            if k not in {"gate_pass", "gate_pass_long", "gate_pass_short"}
-        }
+        payload = {k: (None if pd.isna(v) else float(v)) for k, v in row.items() if k not in {"gate_pass_long", "gate_pass_short"}}
         snapshots.append(
             MicroFeatureSnapshot(
                 ts=int(ts.timestamp() * 1000),
                 symbol=symbol,
-                gate_pass=bool(row.get("gate_pass", False)),
                 gate_pass_long=bool(row.get("gate_pass_long", False)),
                 gate_pass_short=bool(row.get("gate_pass_short", False)),
                 **payload,
             )
         )
     return snapshots
+

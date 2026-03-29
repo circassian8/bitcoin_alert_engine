@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -83,6 +84,9 @@ class ExperimentCandidateConfig:
     require_crowding_veto: bool = False
     require_micro_gate: bool = False
     require_macro_veto: bool = False
+    stop_width_multiplier: float = 1.0
+    target_r_multiple: float = 2.0
+    sides: tuple[str, ...] = ("long",)
 
 
 @dataclass(slots=True)
@@ -108,18 +112,8 @@ FEATURE_SCHEMA_MAP: dict[str, type] = {
 
 
 INTRINSIC_CANDIDATE_FEATURES_BY_MODULE: dict[str, set[str]] = {
-    "continuation_v1": {
-        "side_sign",
-        "atr15",
-        "signal_risk",
-        "signal_risk_pct",
-        "setup_age_1h",
-        "setup_impulse_atr_1h",
-        "setup_pullback_depth_frac",
-        "setup_dist_to_level_aligned",
-        "setup_dist_to_ema50_4h_aligned",
-    },
-    "stress_reversal_v0": {"side_sign", "atr15", "signal_risk", "signal_risk_pct"},
+    "continuation_v1": {"atr15", "signal_risk", "signal_risk_pct", "side_sign"},
+    "stress_reversal_v0": {"atr15", "signal_risk", "signal_risk_pct", "side_sign"},
 }
 
 
@@ -211,12 +205,41 @@ def _load_typed_features(derived_dir: Path, symbol: str, block_name: str) -> lis
     return load_feature_models([path], model_cls)
 
 
-def derive_candidate_config(blocks: list[str]) -> ExperimentCandidateConfig:
+def derive_candidate_config(experiment: dict[str, Any]) -> ExperimentCandidateConfig:
+    blocks = list(experiment.get("blocks", []))
+    generator_params = dict(experiment.get("generator_params", {}) or {})
+    stop_width_multiplier = generator_params.get("stop_width_multiplier", 1.0)
+    try:
+        stop_width_multiplier = float(stop_width_multiplier)
+    except (TypeError, ValueError):
+        stop_width_multiplier = 1.0
+    if not math.isfinite(stop_width_multiplier) or stop_width_multiplier <= 0:
+        stop_width_multiplier = 1.0
+    target_r_multiple = generator_params.get("target_r_multiple", 2.0)
+    try:
+        target_r_multiple = float(target_r_multiple)
+    except (TypeError, ValueError):
+        target_r_multiple = 2.0
+    if not math.isfinite(target_r_multiple) or target_r_multiple <= 0:
+        target_r_multiple = 2.0
+    requested_sides = experiment.get("sides") or ["long"]
+    sides: list[str] = []
+    for side in requested_sides:
+        value = str(side).lower()
+        if value not in {"long", "short"}:
+            continue
+        if value not in sides:
+            sides.append(value)
+    if not sides:
+        sides = ["long"]
     return ExperimentCandidateConfig(
         require_regime_gate="regime_bybit" in blocks,
         require_crowding_veto="crowding_bybit_veto" in blocks,
         require_micro_gate="micro_bybit_gate" in blocks,
         require_macro_veto="macro_veto" in blocks,
+        stop_width_multiplier=stop_width_multiplier,
+        target_r_multiple=target_r_multiple,
+        sides=tuple(sides),
     )
 
 
@@ -278,9 +301,8 @@ def build_experiment_event_frame(
     if not trade_bars:
         return ExperimentDataset(experiment_id, generator, blocks, pd.DataFrame(), [], pd.DataFrame(), skip_reason="missing_trade_bars")
 
-    config = derive_candidate_config(blocks)
+    config = derive_candidate_config(experiment)
     generator_inputs = _load_generator_inputs(derived_dir, symbol, generator=generator, config=config)
-    sides = tuple(str(side).lower() for side in experiment.get("sides", ["long"])) or ("long",)
 
     if generator == "continuation_v1":
         candidates = build_continuation_candidates(
@@ -295,7 +317,9 @@ def build_experiment_event_frame(
             require_micro_gate=config.require_micro_gate,
             require_macro_veto=config.require_macro_veto,
             macro_features=generator_inputs["macro"],
-            sides=sides,
+            stop_width_multiplier=config.stop_width_multiplier,
+            target_r_multiple=config.target_r_multiple,
+            sides=config.sides,
         )
     elif generator == "stress_reversal_v0":
         candidates = build_stress_reversal_candidates(
@@ -308,7 +332,7 @@ def build_experiment_event_frame(
             require_micro_gate=config.require_micro_gate,
             require_macro_veto=config.require_macro_veto,
             macro_features=generator_inputs["macro"],
-            sides=sides,
+            sides=config.sides,
         )
     else:
         return ExperimentDataset(experiment_id, generator, blocks, pd.DataFrame(), [], pd.DataFrame(), skip_reason=f"unknown_generator:{generator}")

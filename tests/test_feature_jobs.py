@@ -128,4 +128,5 @@ def test_crowding_and_micro_features(tmp_path: Path) -> None:
     assert last_crowding.long_short_ratio_1h is not None and last_crowding.long_short_ratio_1h > 1
     assert last_micro.ofi_60s is not None and last_micro.ofi_60s > 0
     assert last_micro.median_bookimb_l10_60s is not None and last_micro.median_bookimb_l10_60s > 0.05
-    assert last_micro.gate_pass is True
+    assert last_micro.gate_pass_long is True
+    assert last_micro.gate_pass_short is False

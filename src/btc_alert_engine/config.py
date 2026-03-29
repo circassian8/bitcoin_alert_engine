@@ -81,4 +81,4 @@ def load_feature_contracts(path: str | Path) -> FeatureContracts:
 def default_reports_root(data_dir: str | Path) -> Path:
     data_path = Path(data_dir)
     name = data_path.name or data_path.resolve().name or "data"
-    return Path("reports") / name
+    return Path("./reports") / name

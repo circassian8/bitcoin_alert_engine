@@ -173,12 +173,13 @@ class TrendFeatureSnapshot(BaseModel):
     pullback_depth_frac: float | None = None
     pullback_bars: float | None = None
     dist_to_breakout_level: float | None = None
+    dist_to_ema50_4h: float | None = None
     breakdown_age_1h: float | None = None
     downside_impulse_atr_1h: float | None = None
-    rebound_depth_frac: float | None = None
-    rebound_bars: float | None = None
+    bounce_depth_frac: float | None = None
+    bounce_bars: float | None = None
     dist_to_breakdown_level: float | None = None
-    dist_to_ema50_4h: float | None = None
+    dist_below_ema50_4h: float | None = None
 
 
 class RegimeFeatureSnapshot(BaseModel):
@@ -235,9 +236,17 @@ class MicroFeatureSnapshot(BaseModel):
     cancel_add_ratio_30s: float | None = None
     micro_vol_60s: float | None = None
     median_bookimb_l10_60s: float | None = None
-    gate_pass: bool = False
     gate_pass_long: bool = False
     gate_pass_short: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compat_gate_pass(cls, values: Any) -> Any:
+        if isinstance(values, dict) and "gate_pass" in values:
+            gate_value = bool(values.get("gate_pass"))
+            values.setdefault("gate_pass_long", gate_value)
+            values.setdefault("gate_pass_short", False)
+        return values
 
 
 class DeribitOptionsFeatureSnapshot(BaseModel):

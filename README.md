@@ -13,8 +13,7 @@ This repo now covers the full **research-foundation path through walk-forward ex
 - external context feature jobs for Deribit, macro calendars, Glassnode, CryptoQuant, and CoinGlass overlays
 - continuation and stress-reversal candidate generators with mirrored long/short support
 - target-aware, quote-aware, first-touch barrier label generation for event datasets
-- walk-forward experiment runner with both event-level and executable portfolio metrics
-- promotion reports that respect one-position-at-a-time portfolio evaluation
+- walk-forward experiment runner with promotion reports
 - project verification checks for contracts, derived blocks, and experiment readiness
 - frozen research contracts loaded from YAML
 
@@ -36,7 +35,7 @@ This repo now covers the full **research-foundation path through walk-forward ex
 - private authenticated execution on Bybit
 - Telegram / Slack notifiers
 - live probability serving and online recalibration
-- authenticated execution and live orchestration beyond the current research reports
+- portfolio-level orchestration beyond the current research reports
 
 Those belong in later phases after the data plane, feature jobs, and experiment registry are stable.
 
@@ -139,7 +138,7 @@ btc-alert-engine features coinglass-overlay --data-dir ./data
 btc-alert-engine signals bybit-candidates --data-dir ./data --enable-macro-veto --sides long short
 btc-alert-engine research label-candidates --data-dir ./data --latency-ms 0
 btc-alert-engine research walkforward --data-dir ./data --registry ./research_registry.yaml --skip-missing
-btc-alert-engine verify project --data-dir ./data --registry ./research_registry.yaml --contracts ./feature_contracts.yaml
+btc-alert-engine verify project --data-dir ./data --registry ./research_registry.yaml --contracts ./feature_contracts.yaml --strict
 ```
 
 Derived outputs are written under `data/derived/` in partitioned NDJSON form.
@@ -155,30 +154,36 @@ Derived outputs are written under `data/derived/` in partitioned NDJSON form.
 
 ## Walk-forward experiments
 
-The walk-forward runner reads `research_registry.yaml`, rebuilds experiment-specific candidate sets, trains baseline / challenger models, calibrates probabilities, and writes promotion-ready reports under:
+The walk-forward runner reads `research_registry.yaml`, rebuilds experiment-specific candidate sets, trains baseline / challenger models, calibrates probabilities, evaluates both event-level and one-position-at-a-time executable portfolio metrics, and writes promotion-ready reports under:
 
 ```text
 reports/<data-dir-name>/walkforward/
 ```
 
 Files:
-- `manifest.json`
+- `manifest.json` (now includes report provenance hashes for code, registry, contracts, and data state)
 - `fold_metrics.csv`
 - `summary_metrics.csv`
 - `promotion_decisions.csv`
 - `promotion_report.md`
 
-`summary_metrics.csv` now carries two views of performance:
-- the executable portfolio view (`n_alerts`, `alerts_per_week`, `expectancy_r_per_alert`, etc.), which applies the configured one-position-at-a-time policy
-- the raw event view (`event_*` columns), which shows how many threshold-passing alerts existed before overlap filtering
+Important semantics:
+- generic metrics such as `expectancy_r_per_alert`, `alerts_per_week`, and `worst_20_trade_drawdown_r` now refer to the executable one-position-at-a-time portfolio path
+- matching `event_*` columns in the CSV outputs preserve the unconstrained event-level view for diagnostics
+- alert budgets are computed against the actual split window duration, not the candidate timestamp span
 
 Experiments that require unavailable feature blocks, such as optional vendor overlays, are skipped automatically when `--skip-missing` is set.
-
-Mirrored long/short research presets are also included at `research_registry_smoke_symmetric.yaml` and `research_registry_broad_test_symmetric.yaml`. Use those when you want to evaluate a first-pass symmetric short implementation without changing execution or labeling.
 
 For the first real-data pass, use `research_registry_pilot.yaml` together with `real_data_pilot_runbook.md`. The pilot registry shortens the train/calibration/test windows so you can validate the pipeline on a fresh multi-month slice before moving to the full registry.
 
 A convenience script is also included at `scripts/run_real_data_pilot.sh`.
+
+Symmetric long/short research presets are included as:
+- `research_registry_smoke_symmetric.yaml`
+- `research_registry_broad_test_symmetric.yaml`
+- `scripts/run_real_data_smoke_walkforward_symmetric.sh`
+- `scripts/run_real_data_broad_walkforward_symmetric.sh`
+
 
 ## Verification
 
@@ -195,11 +200,11 @@ Files:
 Verification checks:
 - registry blocks vs feature contracts
 - contract fields vs implemented schema classes
+- purge / embargo discipline versus label horizon
 - derived block parseability and timestamp hygiene
 - experiment build readiness and skip reasons
-- warnings when purge/embargo are shorter than the label horizon
-- warnings when microstructure blocks are missing for experiments that request them
-- warnings when execution falls back to bar-level entry/path simulation
+- warnings when execution falls back entirely to bar-level entry/path logic
+- warnings when microstructure experiments are requested without usable micro feature rows
 - raw execution-tape availability and gap/recovery status
 
 ## Design rules

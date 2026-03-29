@@ -20,12 +20,13 @@ feature_blocks:
     - pullback_depth_frac
     - pullback_bars
     - dist_to_breakout_level
+    - dist_to_ema50_4h
     - breakdown_age_1h
     - downside_impulse_atr_1h
-    - rebound_depth_frac
-    - rebound_bars
+    - bounce_depth_frac
+    - bounce_bars
     - dist_to_breakdown_level
-    - dist_to_ema50_4h
+    - dist_below_ema50_4h
   regime_bybit:
     source: bybit
     pit: strict
@@ -98,16 +99,20 @@ feature_blocks:
     - replenish_rate_30s
     - cancel_add_ratio_30s
     - micro_vol_60s
+    - median_bookimb_l10_60s
   micro_bybit_gate:
     source: derived_from_bybit_ws
     pit: strict
     cadence:
     - 1s
     hard_rules:
-    - 'gate_pass_long: ofi_60s > 0 and median_bookimb_l10_60s > 0.05 and spread_z
-      < 1.5 and abs(vwap_mid_dev_30s_z) < 2'
-    - 'gate_pass_short: ofi_60s < 0 and median_bookimb_l10_60s < -0.05 and spread_z
-      < 1.5 and abs(vwap_mid_dev_30s_z) < 2'
+    - gate_pass_long_if_ofi_60s > 0_and_median_bookimb_l10_60s > 0.05_and_spread_z
+      < 1.5_and_abs(vwap_mid_dev_30s_z) < 2
+    - gate_pass_short_if_ofi_60s < 0_and_median_bookimb_l10_60s < -0.05_and_spread_z
+      < 1.5_and_abs(vwap_mid_dev_30s_z) < 2
+    fields:
+    - gate_pass_long
+    - gate_pass_short
   options_deribit:
     source: deribit
     pit: strict

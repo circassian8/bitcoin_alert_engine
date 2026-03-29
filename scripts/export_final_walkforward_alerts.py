@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from btc_alert_engine.config import load_research_registry
+from btc_alert_engine.config import default_reports_root, load_research_registry
 from btc_alert_engine.research.execution import build_raw_execution_tape
 from btc_alert_engine.research.experiments import build_experiment_event_frame, feature_columns_for_experiment
 from btc_alert_engine.research.walkforward import (
@@ -22,13 +22,28 @@ from btc_alert_engine.research.walkforward import (
 
 def _primary_budget(registry: object) -> int:
     promotion_rules = getattr(registry, "promotion_rules", {}) or {}
-    if "primary_budget_per_week" in promotion_rules:
+    if hasattr(promotion_rules, "get") and "primary_budget_per_week" in promotion_rules:
         return int(promotion_rules["primary_budget_per_week"])
-    goal = getattr(registry, "goal")
-    return int(goal.get("production_budget_per_week", 3))
+    goal = getattr(registry, "goal", {}) or {}
+    if hasattr(goal, "get"):
+        return int(goal.get("production_budget_per_week", 3))
+    return 3
 
 
-def _load_selected_models(reports_dir: Path) -> dict[str, str | None]:
+def _first_notional(registry: object, override: float | None) -> float | None:
+    if override is not None:
+        return float(override)
+    execution_costs = getattr(registry, "execution_costs", {}) or {}
+    if hasattr(execution_costs, "get"):
+        notionals = execution_costs.get("notionals_usd", [])
+        if notionals:
+            return float(notionals[0])
+    return None
+
+
+def _load_selected_models(reports_dir: Path | None) -> dict[str, str | None]:
+    if reports_dir is None:
+        return {}
     manifest_path = reports_dir / "manifest.json"
     if not manifest_path.exists():
         return {}
@@ -65,46 +80,81 @@ def _side_summary(frame: pd.DataFrame, *, experiment_id: str, selection_kind: st
     return rows
 
 
+def _enrich(frame: pd.DataFrame, *, notional_usd: float | None) -> pd.DataFrame:
+    out = frame.copy()
+    out["ts_dt"] = pd.to_datetime(out["ts_dt"], utc=True)
+    out["trade_index"] = range(1, len(out) + 1)
+    out["cumulative_r"] = out["realized_r"].cumsum()
+    out["equity_peak_r"] = out["cumulative_r"].cummax()
+    out["drawdown_r"] = out["equity_peak_r"] - out["cumulative_r"]
+    if {"executed_entry", "stop_y"}.issubset(out.columns):
+        out["signal_risk"] = out["executed_entry"] - out["stop_y"]
+        out["risk_pct"] = out["signal_risk"] / out["executed_entry"]
+        if notional_usd is not None:
+            out["notional_usd"] = float(notional_usd)
+            out["risk_usd"] = out["risk_pct"] * float(notional_usd)
+            out["pnl_usd"] = out["realized_r"] * out["risk_usd"]
+            out["cumulative_pnl_usd"] = out["pnl_usd"].cumsum()
+            out["equity_peak_pnl_usd"] = out["cumulative_pnl_usd"].cummax()
+            out["drawdown_pnl_usd"] = out["equity_peak_pnl_usd"] - out["cumulative_pnl_usd"]
+    return out
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export final-split alerts for a walk-forward report directory.")
-    parser.add_argument("--data-dir", required=True, help="Data directory used for the walk-forward run.")
-    parser.add_argument("--registry", required=True, help="Registry used for the walk-forward run.")
-    parser.add_argument("--reports-dir", required=True, help="Walk-forward report directory containing manifest.json.")
+    parser.add_argument("--data-dir", default="./data-pilot-long")
+    parser.add_argument("--registry", default="./research_registry_broad_test.yaml")
+    parser.add_argument("--reports-dir", default=None, help="Walk-forward report directory containing manifest.json.")
     parser.add_argument("--symbol", default="BTCUSDT")
+    parser.add_argument("--experiment-id", default=None, help="Optional single experiment id to export.")
     parser.add_argument("--experiments", nargs="+", default=None, help="Optional experiment ids to export.")
-    parser.add_argument("--budget-per-week", type=int, default=None, help="Budget to export. Defaults to the registry primary budget.")
+    parser.add_argument("--budget", type=int, default=None, help="Budget to export. Defaults to the registry primary budget.")
     parser.add_argument("--model-key", default=None, help="Optional model override. Defaults to the selected model in manifest.json.")
     parser.add_argument("--slippage-bps", type=float, default=1.0)
+    parser.add_argument("--notional-usd", type=float, default=None)
+    parser.add_argument("--output-dir", default=None, help="Output directory. Defaults to reports-dir when provided.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
 
-    data_dir = Path(args.data_dir)
+    data_root = Path(args.data_dir)
     registry = load_research_registry(args.registry)
-    reports_dir = Path(args.reports_dir)
-    derived_dir = data_dir / "derived"
-    raw_dir = data_dir / "raw"
+    reports_dir = Path(args.reports_dir) if args.reports_dir else None
+    output_dir = Path(args.output_dir) if args.output_dir else (reports_dir or default_reports_root(data_root) / "walkforward")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    requested_ids: set[str] = set()
+    if args.experiment_id:
+        requested_ids.add(str(args.experiment_id))
+    if args.experiments:
+        requested_ids.update(str(item) for item in args.experiments)
+
+    selected_models = _load_selected_models(reports_dir)
+    budget = args.budget if args.budget is not None else _primary_budget(registry)
+    calibration_order = registry.models.get("calibration", {}).get("order", ["isotonic", "sigmoid"])
+    portfolio_mode, selection_policy, cooldown_minutes = _portfolio_settings(registry.goal)
+    final_split = make_final_split(registry.validation)
+    latency_ms = int(registry.labeling.get("latency_ms", 0))
+    notional_usd = _first_notional(registry, args.notional_usd)
+
+    derived_dir = data_root / "derived"
+    raw_dir = data_root / "raw"
     raw_paths = [raw_dir] if raw_dir.exists() else None
     raw_tape = None
     if raw_paths:
         raw_tape, _ = build_raw_execution_tape(raw_paths, symbol=args.symbol, tolerate_gaps=True)
 
-    selected_models = _load_selected_models(reports_dir)
-    budget_per_week = args.budget_per_week if args.budget_per_week is not None else _primary_budget(registry)
-    calibration_order = registry.models.get("calibration", {}).get("order", ["isotonic", "sigmoid"])
-    selection_policy, cooldown_minutes = _portfolio_settings(registry.goal)
-    final_split = make_final_split(registry.validation)
-    latency_ms = int(registry.labeling.get("latency_ms", 0))
-
-    summary_rows: list[dict[str, object]] = []
     selected_experiments = [
         experiment
         for experiment in registry.experiments
-        if args.experiments is None or str(experiment["id"]) in set(args.experiments)
+        if not requested_ids or str(experiment["id"]) in requested_ids
     ]
+    if not selected_experiments:
+        raise SystemExit("no matching experiments")
 
+    summary_rows: list[dict[str, object]] = []
     for experiment in selected_experiments:
         experiment_id = str(experiment["id"])
         model_key = args.model_key or selected_models.get(experiment_id)
@@ -144,9 +194,10 @@ def main() -> None:
         threshold = threshold_for_budget(
             calibrate,
             p_cal,
-            budget_per_week=budget_per_week,
+            budget_per_week=budget,
             window_start=final_split.calibrate_start,
             window_end=final_split.calibrate_end,
+            portfolio_mode=portfolio_mode,
             selection_policy=selection_policy,
             cooldown_minutes=cooldown_minutes,
         )
@@ -154,32 +205,35 @@ def main() -> None:
         final_frame = test.copy()
         final_frame["p"] = p_test
         final_frame["split_kind"] = "final"
-        final_frame["budget_per_week"] = budget_per_week
+        final_frame["budget_per_week"] = budget
         final_frame["threshold"] = threshold
         final_frame["model_key"] = model_key
+        final_frame["portfolio_mode"] = portfolio_mode
+        final_frame["selection_policy"] = selection_policy
+        final_frame["cooldown_minutes"] = cooldown_minutes
 
         event_selected = final_frame[final_frame["p"] >= threshold].sort_values("ts").reset_index(drop=True)
         portfolio_selected = _apply_portfolio_policy(
             event_selected,
+            mode=portfolio_mode,
             selection_policy=selection_policy,
             cooldown_minutes=cooldown_minutes,
         ).reset_index(drop=True)
 
         export_sets = {
-            "event": event_selected,
-            "portfolio": portfolio_selected,
+            "event": _enrich(event_selected.assign(selection_scope="event"), notional_usd=notional_usd),
+            "portfolio": _enrich(portfolio_selected.assign(selection_scope="portfolio"), notional_usd=notional_usd),
         }
         for selection_kind, frame in export_sets.items():
-            csv_path = reports_dir / f"{experiment_id}_final_{selection_kind}_alerts.csv"
-            _write_alert_csv(csv_path, frame)
-
-            # Backward-compatible alias for the historical event-level export name.
+            canonical = output_dir / f"{experiment_id}_final_{selection_kind}_alerts.csv"
+            compat = output_dir / f"{experiment_id}_{selection_kind}_final_alerts.csv"
+            _write_alert_csv(canonical, frame)
+            _write_alert_csv(compat, frame)
             if selection_kind == "event":
-                _write_alert_csv(reports_dir / f"{experiment_id}_final_alerts.csv", frame)
-
+                _write_alert_csv(output_dir / f"{experiment_id}_final_alerts.csv", frame)
             for side in ("long", "short"):
                 side_frame = frame[frame["side"] == side].reset_index(drop=True)
-                _write_alert_csv(reports_dir / f"{experiment_id}_final_{selection_kind}_alerts_{side}.csv", side_frame)
+                _write_alert_csv(output_dir / f"{experiment_id}_final_{selection_kind}_alerts_{side}.csv", side_frame)
             summary_rows.extend(_side_summary(frame, experiment_id=experiment_id, selection_kind=selection_kind))
 
         print(
@@ -192,7 +246,7 @@ def main() -> None:
         )
 
     summary_frame = pd.DataFrame(summary_rows)
-    summary_path = reports_dir / "final_alerts_side_summary.csv"
+    summary_path = output_dir / "final_alerts_side_summary.csv"
     summary_frame.to_csv(summary_path, index=False)
     print(summary_path)
 
