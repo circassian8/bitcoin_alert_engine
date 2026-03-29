@@ -181,6 +181,32 @@ def test_fast_regime_block_enables_regime_gate() -> None:
     assert config.require_regime_gate is True
 
 
+def test_derive_candidate_config_applies_generator_param_overrides() -> None:
+    config = derive_candidate_config(
+        {
+            "generator": "continuation_v1_fast",
+            "blocks": ["trend_bybit_fast", "regime_bybit_fast", "crowding_bybit_veto"],
+            "sides": ["long", "short"],
+            "generator_params": {
+                "stop_width_multiplier": 1.5,
+                "target_r_multiple": 1.5,
+                "min_impulse_atr": 0.7,
+                "pullback_depth_range": [0.15, 0.70],
+                "require_crowding_veto": False,
+            },
+        }
+    )
+    assert config.stop_width_multiplier == 1.5
+    assert config.target_r_multiple == 1.5
+    assert config.min_impulse_atr == 0.7
+    assert config.pullback_depth_min == 0.15
+    assert config.pullback_depth_max == 0.70
+    assert config.bounce_depth_min == 0.15
+    assert config.bounce_depth_max == 0.70
+    assert config.require_regime_gate is True
+    assert config.require_crowding_veto is False
+
+
 def test_fast_label_candidates_use_5m_bar_timing() -> None:
     bars = [
         PriceBar(ts=1_000, symbol="BTCUSDT", interval="5", open=100.0, high=100.2, low=99.8, close=100.0, volume=10, turnover=1000),

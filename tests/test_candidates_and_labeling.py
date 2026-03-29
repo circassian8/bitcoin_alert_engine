@@ -387,6 +387,111 @@ def test_build_continuation_candidates_respects_target_r_multiple() -> None:
     assert target_candidate.tp < base_candidate.tp
 
 
+def test_build_continuation_candidates_supports_relaxed_fast_thresholds() -> None:
+    bars = _make_trending_bars()
+    trend = []
+    regime = []
+    crowding = []
+    micro = []
+    for bar in bars:
+        trend.append(
+            TrendFeatureSnapshot(
+                ts=bar.ts,
+                symbol="BTCUSDT",
+                ret_15m_1=0.01,
+                ret_1h_4=0.04,
+                ret_4h_6=0.08,
+                ema50_4h_gap=0.03,
+                ema50_4h_slope=0.02,
+                ema200_4h_slope=0.01,
+                adx14_4h=24,
+                atr_pctile_90d=55,
+                breakout_age_1h=5,
+                impulse_atr_1h=0.8,
+                pullback_depth_frac=0.65,
+                pullback_bars=2,
+                dist_to_breakout_level=0.01,
+                dist_to_ema50_4h=0.015,
+            )
+        )
+        regime.append(
+            RegimeFeatureSnapshot(
+                ts=bar.ts,
+                symbol="BTCUSDT",
+                rv_1d=0.02,
+                rv_7d=0.03,
+                atr_pctile_90d=55,
+                jump_intensity_1d=0.05,
+                mark_index_gap=0.0005,
+                premium_index_15m=0.001,
+                premium_z_7d=0.2,
+                stress_score=0.1,
+                trend_score=0.7,
+                range_score=0.15,
+            )
+        )
+        crowding.append(
+            CrowdingFeatureSnapshot(
+                ts=bar.ts,
+                symbol="BTCUSDT",
+                funding_8h=0.0,
+                funding_z_7d=0.0,
+                premium_index_15m=0.0,
+                premium_z_7d=0.0,
+                oi_level=1_000_000,
+                oi_change_1h=0.0,
+                oi_change_4h=0.0,
+                long_short_ratio_1h=1.0,
+                liq_longs_z_1h=0.1,
+                liq_shorts_z_1h=0.1,
+                crowding_long_score=0.0,
+                crowding_short_score=0.0,
+                veto_long=False,
+                veto_short=False,
+            )
+        )
+        micro.append(
+            MicroFeatureSnapshot(
+                ts=bar.ts,
+                symbol="BTCUSDT",
+                ofi_10s=10,
+                ofi_60s=10,
+                ofi_300s=10,
+                cum_delta_60s=1,
+                spread_bps=1.0,
+                spread_z=0.0,
+                bookimb_l1=0.1,
+                bookimb_l5=0.1,
+                bookimb_l10=0.1,
+                top10_depth_usd=1_000_000,
+                depth_decay=0.1,
+                vwap_mid_dev_30s=0.0,
+                vwap_mid_dev_30s_z=0.0,
+                replenish_rate_30s=1.0,
+                cancel_add_ratio_30s=1.0,
+                micro_vol_60s=0.01,
+                median_bookimb_l10_60s=0.1,
+                gate_pass=True,
+            )
+        )
+
+    strict = build_continuation_candidates(bars, trend, regime, crowding, micro, symbol="BTCUSDT")
+    relaxed = build_continuation_candidates(
+        bars,
+        trend,
+        regime,
+        crowding,
+        micro,
+        symbol="BTCUSDT",
+        min_impulse_atr=0.7,
+        pullback_depth_min=0.15,
+        pullback_depth_max=0.70,
+    )
+
+    assert not strict
+    assert relaxed
+
+
 def test_build_stress_reversal_candidates() -> None:
     bars = []
     base_ts = 1_700_000_000_000

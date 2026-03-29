@@ -113,6 +113,11 @@ class ExperimentCandidateConfig:
     require_macro_veto: bool = False
     stop_width_multiplier: float = 1.0
     target_r_multiple: float = 2.0
+    min_impulse_atr: float = 1.0
+    pullback_depth_min: float = 0.20
+    pullback_depth_max: float = 0.60
+    bounce_depth_min: float = 0.20
+    bounce_depth_max: float = 0.60
     sides: tuple[str, ...] = ("long",)
 
 
@@ -249,20 +254,15 @@ def _load_typed_features(derived_dir: Path, symbol: str, block_name: str) -> lis
 def derive_candidate_config(experiment: dict[str, Any]) -> ExperimentCandidateConfig:
     blocks = list(experiment.get("blocks", []))
     generator_params = dict(experiment.get("generator_params", {}) or {})
-    stop_width_multiplier = generator_params.get("stop_width_multiplier", 1.0)
-    try:
-        stop_width_multiplier = float(stop_width_multiplier)
-    except (TypeError, ValueError):
-        stop_width_multiplier = 1.0
-    if not math.isfinite(stop_width_multiplier) or stop_width_multiplier <= 0:
-        stop_width_multiplier = 1.0
-    target_r_multiple = generator_params.get("target_r_multiple", 2.0)
-    try:
-        target_r_multiple = float(target_r_multiple)
-    except (TypeError, ValueError):
-        target_r_multiple = 2.0
-    if not math.isfinite(target_r_multiple) or target_r_multiple <= 0:
-        target_r_multiple = 2.0
+    stop_width_multiplier = _float_param(generator_params.get("stop_width_multiplier"), 1.0, minimum=0.0)
+    target_r_multiple = _float_param(generator_params.get("target_r_multiple"), 2.0, minimum=0.0)
+    min_impulse_atr = _float_param(generator_params.get("min_impulse_atr"), 1.0, minimum=0.0)
+    pullback_depth_min, pullback_depth_max = _depth_range_params(generator_params, "pullback_depth", default=(0.20, 0.60))
+    bounce_depth_min, bounce_depth_max = _depth_range_params(
+        generator_params,
+        "bounce_depth",
+        default=(pullback_depth_min, pullback_depth_max),
+    )
     requested_sides = experiment.get("sides") or ["long"]
     sides: list[str] = []
     for side in requested_sides:
@@ -273,15 +273,68 @@ def derive_candidate_config(experiment: dict[str, Any]) -> ExperimentCandidateCo
             sides.append(value)
     if not sides:
         sides = ["long"]
+    require_regime_gate = any(block in {"regime_bybit", "regime_bybit_fast"} for block in blocks)
+    require_crowding_veto = "crowding_bybit_veto" in blocks
+    require_micro_gate = "micro_bybit_gate" in blocks
+    require_macro_veto = "macro_veto" in blocks
+    require_regime_gate = _bool_param(generator_params.get("require_regime_gate"), require_regime_gate)
+    require_crowding_veto = _bool_param(generator_params.get("require_crowding_veto"), require_crowding_veto)
+    require_micro_gate = _bool_param(generator_params.get("require_micro_gate"), require_micro_gate)
+    require_macro_veto = _bool_param(generator_params.get("require_macro_veto"), require_macro_veto)
     return ExperimentCandidateConfig(
-        require_regime_gate=any(block in {"regime_bybit", "regime_bybit_fast"} for block in blocks),
-        require_crowding_veto="crowding_bybit_veto" in blocks,
-        require_micro_gate="micro_bybit_gate" in blocks,
-        require_macro_veto="macro_veto" in blocks,
+        require_regime_gate=require_regime_gate,
+        require_crowding_veto=require_crowding_veto,
+        require_micro_gate=require_micro_gate,
+        require_macro_veto=require_macro_veto,
         stop_width_multiplier=stop_width_multiplier,
         target_r_multiple=target_r_multiple,
+        min_impulse_atr=min_impulse_atr,
+        pullback_depth_min=pullback_depth_min,
+        pullback_depth_max=pullback_depth_max,
+        bounce_depth_min=bounce_depth_min,
+        bounce_depth_max=bounce_depth_max,
         sides=tuple(sides),
     )
+
+
+def _float_param(value: object, default: float, *, minimum: float | None = None, maximum: float | None = None) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(parsed):
+        return default
+    if minimum is not None and parsed <= minimum:
+        return default
+    if maximum is not None and parsed >= maximum:
+        return default
+    return parsed
+
+
+def _bool_param(value: object, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _depth_range_params(generator_params: dict[str, Any], prefix: str, *, default: tuple[float, float]) -> tuple[float, float]:
+    range_value = generator_params.get(f"{prefix}_range")
+    if isinstance(range_value, (list, tuple)) and len(range_value) == 2:
+        low = _float_param(range_value[0], default[0], minimum=-1.0)
+        high = _float_param(range_value[1], default[1], minimum=-1.0)
+    else:
+        low = _float_param(generator_params.get(f"{prefix}_min"), default[0], minimum=-1.0)
+        high = _float_param(generator_params.get(f"{prefix}_max"), default[1], minimum=-1.0)
+    if low < 0 or high <= low:
+        return default
+    return (low, high)
 
 
 def _load_generator_inputs(
@@ -367,6 +420,11 @@ def build_experiment_event_frame(
             macro_features=generator_inputs["macro"],
             stop_width_multiplier=config.stop_width_multiplier,
             target_r_multiple=config.target_r_multiple,
+            min_impulse_atr=config.min_impulse_atr,
+            pullback_depth_min=config.pullback_depth_min,
+            pullback_depth_max=config.pullback_depth_max,
+            bounce_depth_min=config.bounce_depth_min,
+            bounce_depth_max=config.bounce_depth_max,
             sides=config.sides,
             profile=profile,
         )

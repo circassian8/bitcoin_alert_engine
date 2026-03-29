@@ -112,6 +112,11 @@ def build_continuation_candidates(
     require_macro_veto: bool = False,
     stop_width_multiplier: float = 1.0,
     target_r_multiple: float = 2.0,
+    min_impulse_atr: float = 1.0,
+    pullback_depth_min: float = 0.20,
+    pullback_depth_max: float = 0.60,
+    bounce_depth_min: float | None = None,
+    bounce_depth_max: float | None = None,
     sides: Sequence[str] | None = None,
     profile: str | StrategyProfile = "core",
 ) -> list[CandidateEvent]:
@@ -121,6 +126,8 @@ def build_continuation_candidates(
     if price.empty:
         return []
     run_sides = _normalize_sides(sides)
+    bounce_depth_min = pullback_depth_min if bounce_depth_min is None else bounce_depth_min
+    bounce_depth_max = pullback_depth_max if bounce_depth_max is None else bounce_depth_max
     trend = _align_feature_frame(trend_features, price.index)
     regime = _align_feature_frame(regime_features, price.index)
     crowding = _align_feature_frame(crowding_features, price.index)
@@ -173,8 +180,8 @@ def build_continuation_candidates(
                     "ema50_slope_positive": ema50_slope > 0,
                     "ema200_slope_positive": ema200_slope > 0,
                     "breakout_recent": 0 <= _feature_value(row, "setup_break_age", "breakout_age_1h") <= resolved_profile.setup_active_bars,
-                    "impulse_valid": _feature_value(row, "setup_impulse_atr", "impulse_atr_1h") >= 1.0,
-                    "pullback_depth_valid": 0.20 <= _feature_value(row, "setup_pullback_depth_frac", "pullback_depth_frac") <= 0.60,
+                    "impulse_valid": _feature_value(row, "setup_impulse_atr", "impulse_atr_1h") >= min_impulse_atr,
+                    "pullback_depth_valid": pullback_depth_min <= _feature_value(row, "setup_pullback_depth_frac", "pullback_depth_frac") <= pullback_depth_max,
                     "above_breakout_level": _feature_value(row, "dist_to_setup_breakout_level", "dist_to_breakout_level") > -0.005,
                     "above_regime_ema": _feature_value(row, "dist_to_regime_ema", "dist_to_ema50_4h") > 0,
                     "trigger_break": close_px > _numeric_or_nan(row.get("recent_pivot_high")),
@@ -203,8 +210,8 @@ def build_continuation_candidates(
                     "ema50_slope_negative": ema50_slope < 0,
                     "ema200_slope_negative": ema200_slope < 0,
                     "breakdown_recent": 0 <= _feature_value(row, "setup_breakdown_age", "breakdown_age_1h") <= resolved_profile.setup_active_bars,
-                    "downside_impulse_valid": _feature_value(row, "setup_downside_impulse_atr", "downside_impulse_atr_1h") >= 1.0,
-                    "bounce_depth_valid": 0.20 <= _feature_value(row, "setup_bounce_depth_frac", "bounce_depth_frac") <= 0.60,
+                    "downside_impulse_valid": _feature_value(row, "setup_downside_impulse_atr", "downside_impulse_atr_1h") >= min_impulse_atr,
+                    "bounce_depth_valid": bounce_depth_min <= _feature_value(row, "setup_bounce_depth_frac", "bounce_depth_frac") <= bounce_depth_max,
                     "below_breakdown_level": _feature_value(row, "dist_to_setup_breakdown_level", "dist_to_breakdown_level") > -0.005,
                     "below_regime_ema": _feature_value(row, "dist_below_regime_ema", "dist_below_ema50_4h") > 0,
                     "trigger_break": close_px < _numeric_or_nan(row.get("recent_pivot_low")),
