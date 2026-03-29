@@ -5,6 +5,7 @@ from typing import Iterable, Sequence, TypeVar
 import numpy as np
 import pandas as pd
 
+from btc_alert_engine.features.common import bars_to_ohlcv_frame, reindex_ffill
 from btc_alert_engine.features.indicators import atr
 from btc_alert_engine.schemas import (
     CandidateEvent,
@@ -24,12 +25,7 @@ VALID_SIDES = ("long", "short")
 
 
 def _bars_to_frame(bars: Iterable[PriceBar]) -> pd.DataFrame:
-    rows = [bar.model_dump(mode="json") if isinstance(bar, PriceBar) else bar for bar in bars]
-    if not rows:
-        return pd.DataFrame(columns=["open", "high", "low", "close", "volume", "turnover"])
-    df = pd.DataFrame(rows).drop_duplicates(subset=["ts"], keep="last").sort_values("ts")
-    df.index = pd.to_datetime(df["ts"], unit="ms", utc=True)
-    return df[["open", "high", "low", "close", "volume", "turnover"]].astype(float)
+    return bars_to_ohlcv_frame(bars)
 
 
 def _feature_frame(items: Iterable[object]) -> pd.DataFrame:
@@ -58,7 +54,7 @@ def _align_feature_frame(items: Iterable[object], price_index: pd.DatetimeIndex,
         return pd.DataFrame(index=price_index)
     if resample_rule is not None:
         frame = frame.resample(resample_rule).last()
-    return frame.reindex(price_index, method="ffill")
+    return reindex_ffill(frame, price_index)
 
 
 def _numeric_or_nan(value: object) -> float:
@@ -104,6 +100,10 @@ def build_continuation_candidates(
     stop_width_multiplier: float = 1.0,
     target_r_multiple: float = 2.0,
     sides: Sequence[str] | None = None,
+    max_stress_score: float = 0.55,
+    min_impulse_atr: float = 1.0,
+    pullback_depth_range: tuple[float, float] = (0.20, 0.60),
+    min_dist_to_level: float = -0.005,
 ) -> list[CandidateEvent]:
     price = _bars_to_frame(trade_bars)
     if price.empty:
@@ -161,15 +161,15 @@ def build_continuation_candidates(
                     "ema50_slope_positive": ema50_slope > 0,
                     "ema200_slope_positive": ema200_slope > 0,
                     "breakout_recent": 0 <= _numeric_or_nan(row.get("breakout_age_1h")) <= 10,
-                    "impulse_valid": _numeric_or_nan(row.get("impulse_atr_1h")) >= 1.0,
-                    "pullback_depth_valid": 0.20 <= _numeric_or_nan(row.get("pullback_depth_frac")) <= 0.60,
-                    "above_breakout_level": _numeric_or_nan(row.get("dist_to_breakout_level")) > -0.005,
+                    "impulse_valid": _numeric_or_nan(row.get("impulse_atr_1h")) >= min_impulse_atr,
+                    "pullback_depth_valid": pullback_depth_range[0] <= _numeric_or_nan(row.get("pullback_depth_frac")) <= pullback_depth_range[1],
+                    "above_breakout_level": _numeric_or_nan(row.get("dist_to_breakout_level")) > min_dist_to_level,
                     "above_ema50_4h": _numeric_or_nan(row.get("dist_to_ema50_4h")) > 0,
                     "trigger_break": close_px > _numeric_or_nan(row.get("recent_pivot_high")),
                 }
                 if require_regime_gate:
                     conds["trend_regime"] = trend_score >= range_score
-                    conds["stress_ok"] = stress_score < 0.55
+                    conds["stress_ok"] = stress_score < max_stress_score
                 if require_micro_gate:
                     conds["micro_gate"] = bool(row.get("gate_pass_long", False))
                 if require_macro_veto:
@@ -191,15 +191,15 @@ def build_continuation_candidates(
                     "ema50_slope_negative": ema50_slope < 0,
                     "ema200_slope_negative": ema200_slope < 0,
                     "breakdown_recent": 0 <= _numeric_or_nan(row.get("breakdown_age_1h")) <= 10,
-                    "downside_impulse_valid": _numeric_or_nan(row.get("downside_impulse_atr_1h")) >= 1.0,
-                    "bounce_depth_valid": 0.20 <= _numeric_or_nan(row.get("bounce_depth_frac")) <= 0.60,
-                    "below_breakdown_level": _numeric_or_nan(row.get("dist_to_breakdown_level")) > -0.005,
+                    "downside_impulse_valid": _numeric_or_nan(row.get("downside_impulse_atr_1h")) >= min_impulse_atr,
+                    "bounce_depth_valid": pullback_depth_range[0] <= _numeric_or_nan(row.get("bounce_depth_frac")) <= pullback_depth_range[1],
+                    "below_breakdown_level": _numeric_or_nan(row.get("dist_to_breakdown_level")) > min_dist_to_level,
                     "below_ema50_4h": _numeric_or_nan(row.get("dist_below_ema50_4h")) > 0,
                     "trigger_break": close_px < _numeric_or_nan(row.get("recent_pivot_low")),
                 }
                 if require_regime_gate:
                     conds["trend_regime"] = trend_score >= range_score
-                    conds["stress_ok"] = stress_score < 0.55
+                    conds["stress_ok"] = stress_score < max_stress_score
                 if require_micro_gate:
                     conds["micro_gate"] = bool(row.get("gate_pass_short", False))
                 if require_macro_veto:
@@ -256,6 +256,7 @@ def build_stress_reversal_candidates(
     require_micro_gate: bool = True,
     require_macro_veto: bool = False,
     sides: Sequence[str] | None = None,
+    target_r_multiple: float = 1.5,
 ) -> list[CandidateEvent]:
     price = _bars_to_frame(trade_bars)
     if price.empty:
@@ -327,7 +328,6 @@ def build_stress_reversal_candidates(
                 if stop >= entry:
                     continue
                 risk = entry - stop
-                target_r_multiple = 1.5
                 tp = entry + target_r_multiple * risk
             else:
                 liq_score = _numeric_or_nan(row.get("liq_shorts_z_1h"))
@@ -348,7 +348,6 @@ def build_stress_reversal_candidates(
                 if stop <= entry:
                     continue
                 risk = stop - entry
-                target_r_multiple = 1.5
                 tp = entry - target_r_multiple * risk
 
             feature_payload = {

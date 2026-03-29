@@ -6,6 +6,7 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
+from btc_alert_engine.features.common import bars_to_ohlcv_frame, reindex_ffill
 from btc_alert_engine.features.indicators import adx, atr, ema, resample_ohlcv, rolling_percentile_of_last, rolling_zscore, softmax_scores
 from btc_alert_engine.normalize.bybit_rest import parse_account_ratio_event, parse_funding_history_event, parse_open_interest_event
 from btc_alert_engine.schemas import (
@@ -23,15 +24,7 @@ EPS = 1e-12
 
 
 def _bars_to_frame(bars: Iterable[PriceBar]) -> pd.DataFrame:
-    records = [bar.model_dump(mode="json") if isinstance(bar, PriceBar) else bar for bar in bars]
-    if not records:
-        return pd.DataFrame(columns=["open", "high", "low", "close", "volume", "turnover"])
-    df = pd.DataFrame(records)
-    df = df.drop_duplicates(subset=["ts"], keep="last").sort_values("ts")
-    df.index = pd.to_datetime(df["ts"], unit="ms", utc=True)
-    for col in ["open", "high", "low", "close", "volume", "turnover"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df[["open", "high", "low", "close", "volume", "turnover"]]
+    return bars_to_ohlcv_frame(bars)
 
 
 def _micro_to_frame(buckets: Iterable[MicroBucket1s | dict]) -> pd.DataFrame:
@@ -111,11 +104,13 @@ def _trend_feature_frame(trade_bars: Iterable[PriceBar]) -> pd.DataFrame:
     bars_since_low = float("nan")
 
     for i, (_, row) in enumerate(bars_1h.iterrows()):
-        current_atr = float(atr14_1h.iloc[i]) if not math.isnan(float(atr14_1h.iloc[i])) else float("nan")
+        _raw_atr = float(atr14_1h.iloc[i])
+        current_atr = _raw_atr if not math.isnan(_raw_atr) else float("nan")
 
-        if bool(breakout_flag.iloc[i]) and not math.isnan(float(prior20_high.iloc[i])):
+        _raw_prior_high = float(prior20_high.iloc[i])
+        if bool(breakout_flag.iloc[i]) and not math.isnan(_raw_prior_high):
             active_breakout_idx = i
-            breakout_level = float(prior20_high.iloc[i])
+            breakout_level = _raw_prior_high
             long_impulse = ((float(row["close"]) - breakout_level) / current_atr) if current_atr and not math.isnan(current_atr) else float("nan")
             high_since_breakout = float(row["high"])
             bars_since_high = 0.0
@@ -134,9 +129,10 @@ def _trend_feature_frame(trade_bars: Iterable[PriceBar]) -> pd.DataFrame:
                 else:
                     bars_since_high = 0.0 if math.isnan(bars_since_high) else bars_since_high + 1.0
 
-        if bool(breakdown_flag.iloc[i]) and not math.isnan(float(prior20_low.iloc[i])):
+        _raw_prior_low = float(prior20_low.iloc[i])
+        if bool(breakdown_flag.iloc[i]) and not math.isnan(_raw_prior_low):
             active_breakdown_idx = i
-            breakdown_level = float(prior20_low.iloc[i])
+            breakdown_level = _raw_prior_low
             short_impulse = ((breakdown_level - float(row["close"])) / current_atr) if current_atr and not math.isnan(current_atr) else float("nan")
             low_since_breakdown = float(row["low"])
             bars_since_low = 0.0
@@ -200,8 +196,8 @@ def _trend_feature_frame(trade_bars: Iterable[PriceBar]) -> pd.DataFrame:
 
     trend = pd.DataFrame(index=trade_15m.index)
     trend["ret_15m_1"] = trade_15m["close"].pct_change(1)
-    trend = trend.join(one_h.reindex(trade_15m.index, method="ffill"), how="left")
-    trend = trend.join(four_h.reindex(trade_15m.index, method="ffill"), how="left")
+    trend = trend.join(reindex_ffill(one_h, trade_15m.index), how="left")
+    trend = trend.join(reindex_ffill(four_h, trade_15m.index), how="left")
     trend["dist_to_breakout_level"] = (trade_15m["close"] - trend["breakout_level"]) / trade_15m["close"].replace(0, np.nan)
     trend["dist_to_ema50_4h"] = (trade_15m["close"] - trend["ema50_4h"]) / trade_15m["close"].replace(0, np.nan)
     trend["dist_to_breakdown_level"] = (trend["breakdown_level"] - trade_15m["close"]) / trade_15m["close"].replace(0, np.nan)
@@ -261,13 +257,13 @@ def build_regime_features(trade_bars: Iterable[PriceBar], index_bars: Iterable[P
     regime["jump_intensity_1d"] = jump_intensity_1d
 
     if not index_15m.empty:
-        idx_close = index_15m["close"].reindex(trade_15m.index, method="ffill")
+        idx_close = reindex_ffill(index_15m["close"], trade_15m.index)
         regime["mark_index_gap"] = (close - idx_close) / idx_close.replace(0, np.nan)
     else:
         regime["mark_index_gap"] = np.nan
 
     if not premium_15m.empty:
-        prem_close = premium_15m["close"].reindex(trade_15m.index, method="ffill")
+        prem_close = reindex_ffill(premium_15m["close"], trade_15m.index)
         regime["premium_index_15m"] = prem_close
         regime["premium_z_7d"] = rolling_zscore(prem_close, 96 * 7, min_periods=96)
     else:
@@ -357,7 +353,7 @@ def build_crowding_features(
     base = base.resample("15min").last()
 
     if not funding_df.empty:
-        funding_15 = funding_df["funding_rate"].resample("15min").ffill().reindex(base.index, method="ffill")
+        funding_15 = reindex_ffill(funding_df["funding_rate"].resample("15min").ffill(), base.index)
         base["funding_8h"] = funding_15
         base["funding_z_7d"] = rolling_zscore(funding_15, 96 * 7, min_periods=96)
     else:
@@ -365,7 +361,7 @@ def build_crowding_features(
         base["funding_z_7d"] = np.nan
 
     if not premium_df.empty:
-        prem_15 = premium_df["close"].resample("15min").last().reindex(base.index, method="ffill")
+        prem_15 = reindex_ffill(premium_df["close"].resample("15min").last(), base.index)
         base["premium_index_15m"] = prem_15
         base["premium_z_7d"] = rolling_zscore(prem_15, 96 * 7, min_periods=96)
     else:
@@ -373,7 +369,7 @@ def build_crowding_features(
         base["premium_z_7d"] = np.nan
 
     if not oi_df.empty:
-        oi_15 = oi_df["open_interest"].resample("15min").ffill().reindex(base.index, method="ffill")
+        oi_15 = reindex_ffill(oi_df["open_interest"].resample("15min").ffill(), base.index)
         base["oi_level"] = oi_15
         base["oi_change_1h"] = oi_15.pct_change(4)
         base["oi_change_4h"] = oi_15.pct_change(16)
@@ -385,7 +381,7 @@ def build_crowding_features(
         base["oi_change_4h_z"] = np.nan
 
     if not ratio_df.empty:
-        ratio_15 = ratio_df[["buy_ratio", "sell_ratio"]].resample("15min").ffill().reindex(base.index, method="ffill")
+        ratio_15 = reindex_ffill(ratio_df[["buy_ratio", "sell_ratio"]].resample("15min").ffill(), base.index)
         long_short_ratio = ratio_15["buy_ratio"] / ratio_15["sell_ratio"].replace(0, np.nan)
         base["long_short_ratio_1h"] = long_short_ratio
         base["long_short_ratio_z"] = rolling_zscore(np.log(long_short_ratio.replace(0, np.nan)), 96 * 7, min_periods=96)

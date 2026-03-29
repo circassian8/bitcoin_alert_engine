@@ -32,6 +32,8 @@ class PartitionedNdjsonWriter:
     """
 
     def __init__(self, base_dir: str | Path, *, max_open_handles: int = 64) -> None:
+        if max_open_handles < 1:
+            raise ValueError(f"max_open_handles must be >= 1, got {max_open_handles}")
         self.base_dir = Path(base_dir)
         self.max_open_handles = max_open_handles
         self._handles: OrderedDict[Path, TextIO] = OrderedDict()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from typing import Any
@@ -7,6 +8,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+logger = logging.getLogger(__name__)
+
+from btc_alert_engine.features.common import bars_to_full_frame, reindex_ffill
 from btc_alert_engine.features.indicators import rolling_zscore
 from btc_alert_engine.schemas import (
     CoinGlassAggregateFeatureSnapshot,
@@ -22,12 +26,7 @@ from btc_alert_engine.storage.raw_ndjson import iter_raw_events_sorted
 
 
 def _bars_to_frame(bars: Iterable[PriceBar]) -> pd.DataFrame:
-    rows = [bar.model_dump(mode="json") if isinstance(bar, PriceBar) else bar for bar in bars]
-    if not rows:
-        return pd.DataFrame(columns=["ts", "symbol", "open", "high", "low", "close", "volume", "turnover"])
-    df = pd.DataFrame(rows).drop_duplicates(subset=["ts"], keep="last").sort_values("ts")
-    df.index = pd.to_datetime(df["ts"], unit="ms", utc=True)
-    return df
+    return bars_to_full_frame(bars)
 
 
 def _as_utc_ts(value: Any) -> pd.Timestamp | None:
@@ -51,7 +50,8 @@ def _as_utc_ts(value: Any) -> pd.Timestamp | None:
         else:
             ts = ts.tz_convert("UTC")
         return ts
-    except Exception:
+    except Exception as exc:
+        logger.debug("Failed to parse timestamp value %r: %s", value, exc)
         return None
 
 
@@ -80,7 +80,8 @@ def _row_value(row: dict[str, Any], metric_name: str | None = None) -> float | N
         if key in row and row[key] is not None:
             try:
                 return float(row[key])
-            except Exception:
+            except Exception as exc:
+                logger.debug("Cannot convert row[%r]=%r to float: %s", key, row[key], exc)
                 continue
     ts_like = {"t", "ts", "time", "timestamp", "date", "datetime"}
     numeric_values: list[float] = []
@@ -90,7 +91,7 @@ def _row_value(row: dict[str, Any], metric_name: str | None = None) -> float | N
         try:
             numeric_values.append(float(value))
         except Exception:
-            continue
+            continue  # non-numeric field, expected
     if len(numeric_values) == 1:
         return numeric_values[0]
     return None
@@ -133,7 +134,8 @@ def _extract_single_metric_series(
                 ts = _as_utc_ts(row[0])
                 try:
                     value = float(row[1])
-                except Exception:
+                except Exception as exc:
+                    logger.debug("Cannot convert row element to float: %s", exc)
                     value = None
             if ts is None or value is None or not np.isfinite(value):
                 continue
@@ -166,20 +168,23 @@ def _extract_deribit_dvol_series(raw_paths: Iterable[str | Any], *, currency: st
                         try:
                             close_value = float(row[key])
                             break
-                        except Exception:
+                        except Exception as exc:
+                            logger.debug("Cannot convert dvol row[%r] to float: %s", key, exc)
                             continue
             elif isinstance(row, (list, tuple)):
                 if len(row) >= 5:
                     ts = _as_utc_ts(row[0])
                     try:
                         close_value = float(row[4])
-                    except Exception:
+                    except Exception as exc:
+                        logger.debug("Cannot convert dvol OHLCV close to float: %s", exc)
                         close_value = None
                 elif len(row) >= 2:
                     ts = _as_utc_ts(row[0])
                     try:
                         close_value = float(row[1])
-                    except Exception:
+                    except Exception as exc:
+                        logger.debug("Cannot convert dvol value to float: %s", exc)
                         close_value = None
             if ts is None or close_value is None or not np.isfinite(close_value):
                 continue
@@ -209,7 +214,7 @@ def _align_series_map_to_trade_bars(
         ser = series.copy()
         ser.index = pd.DatetimeIndex(ser.index).tz_convert("UTC") + lag_delta
         ser = ser[~ser.index.duplicated(keep="last")].sort_index()
-        aligned[name] = ser.reindex(aligned.index, method="ffill")
+        aligned[name] = reindex_ffill(ser, aligned.index)
     aligned["ts"] = bars["ts"].astype(int)
     return aligned
 
