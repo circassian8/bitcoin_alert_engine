@@ -7,7 +7,7 @@ import pandas as pd
 import yaml
 
 from btc_alert_engine.research.experiments import ExperimentDataset
-from btc_alert_engine.research.walkforward import run_walkforward_experiments
+from btc_alert_engine.research.walkforward import _build_estimator, run_walkforward_experiments
 
 
 def _synthetic_event_frame() -> pd.DataFrame:
@@ -166,3 +166,8 @@ def test_run_walkforward_experiments_with_synthetic_dataset(tmp_path: Path, monk
     assert {"outer", "final"}.issubset(set(summary["split_kind"]))
     final_budget3 = summary[(summary["split_kind"] == "final") & (summary["budget_per_week"] == 3)]
     assert not final_budget3.empty
+
+
+def test_baseline_estimator_uses_liblinear_solver() -> None:
+    estimator = _build_estimator("baseline")
+    assert estimator.named_steps["model"].solver == "liblinear"

@@ -14,11 +14,13 @@ from btc_alert_engine.normalize.orderbook import (
     OrderBookOutOfOrderError,
     OrderBookStateError,
 )
+from btc_alert_engine.profiles import profile_for_generator
 from btc_alert_engine.schemas import CandidateEvent, MicroBucket1s, PriceBar
 from btc_alert_engine.storage.raw_ndjson import iter_raw_events_sorted
 
 _BUCKET_MS = 1_000
-_BAR_MS = 900_000
+_DEFAULT_BAR_MS = 900_000
+_TP1_WINDOW_MINUTES = 12 * 60
 
 
 @dataclass(slots=True)
@@ -206,6 +208,22 @@ def _mark_price_for_side(side: str, *, bid: float | None = None, ask: float | No
     return None
 
 
+def _trigger_minutes_for_candidate(candidate: CandidateEvent) -> int:
+    try:
+        return profile_for_generator(candidate.module).trigger_minutes
+    except Exception:
+        return _DEFAULT_BAR_MS // 60_000
+
+
+def _trigger_ms_for_candidate(candidate: CandidateEvent) -> int:
+    return _trigger_minutes_for_candidate(candidate) * 60_000
+
+
+def _tp1_window_bars(candidate: CandidateEvent) -> int:
+    trigger_minutes = _trigger_minutes_for_candidate(candidate)
+    return max(_TP1_WINDOW_MINUTES // trigger_minutes, 1)
+
+
 def _update_excursions(side: str, observed_price: float | None, *, entry: float, risk: float, mfe_r: float, mae_r: float) -> tuple[float, float]:
     if observed_price is None:
         return mfe_r, mae_r
@@ -238,7 +256,7 @@ def simulate_with_raw_tape(
 ) -> PathResult | None:
     if raw_tape.empty:
         return None
-    horizon_end_ts = int(candidate.ts) + candidate.timeout_bars * _BAR_MS
+    horizon_end_ts = int(candidate.ts) + candidate.timeout_bars * _trigger_ms_for_candidate(candidate)
     start_after = int(entry.raw_index) if entry.raw_index is not None else -1
     future = raw_tape[(raw_tape.index > start_after) & (raw_tape["ts"] > entry.entry_ts) & (raw_tape["ts"] <= horizon_end_ts)]
     if future.empty:
@@ -348,7 +366,7 @@ def simulate_with_micro_buckets(
 ) -> PathResult | None:
     if micro_frame.empty:
         return None
-    horizon_end_ts = int(candidate.ts) + candidate.timeout_bars * _BAR_MS
+    horizon_end_ts = int(candidate.ts) + candidate.timeout_bars * _trigger_ms_for_candidate(candidate)
     future = micro_frame[(micro_frame["ts"] > entry.entry_ts) & (micro_frame["ts"] <= horizon_end_ts)]
     if future.empty:
         return None
@@ -456,13 +474,15 @@ def simulate_with_trade_bars(
     mfe_r = 0.0
     mae_r = 0.0
     tp1_before_sl = False
+    trigger_minutes = _trigger_minutes_for_candidate(candidate)
+    tp1_bars = _tp1_window_bars(candidate)
     for i, (_, bar) in enumerate(future.iterrows(), start=1):
         high = float(bar["high"])
         low = float(bar["low"])
         if candidate.side == "long":
             mfe_r = max(mfe_r, (high - entry.executed_entry) / risk)
             mae_r = max(mae_r, (entry.executed_entry - low) / risk)
-            if high >= executed_tp1 and i <= 48:
+            if high >= executed_tp1 and i <= tp1_bars:
                 tp1_before_sl = True
             if low <= stop:
                 return PathResult(
@@ -472,7 +492,7 @@ def simulate_with_trade_bars(
                     mfe_r=mfe_r,
                     mae_r=mae_r,
                     net_r_timeout=(float(future.iloc[-1]["close"]) - entry.executed_entry) / risk,
-                    minutes_to_tp_or_sl=i * 15,
+                    minutes_to_tp_or_sl=i * trigger_minutes,
                     exit_ts=int(future.index[i - 1].timestamp() * 1000),
                     executed_exit=stop,
                     path_source="trade_bars",
@@ -485,7 +505,7 @@ def simulate_with_trade_bars(
                     mfe_r=mfe_r,
                     mae_r=mae_r,
                     net_r_timeout=(float(future.iloc[-1]["close"]) - entry.executed_entry) / risk,
-                    minutes_to_tp_or_sl=i * 15,
+                    minutes_to_tp_or_sl=i * trigger_minutes,
                     exit_ts=int(future.index[i - 1].timestamp() * 1000),
                     executed_exit=executed_tp,
                     path_source="trade_bars",
@@ -493,7 +513,7 @@ def simulate_with_trade_bars(
         else:
             mfe_r = max(mfe_r, (entry.executed_entry - low) / risk)
             mae_r = max(mae_r, (high - entry.executed_entry) / risk)
-            if low <= executed_tp1 and i <= 48:
+            if low <= executed_tp1 and i <= tp1_bars:
                 tp1_before_sl = True
             if high >= stop:
                 return PathResult(
@@ -503,7 +523,7 @@ def simulate_with_trade_bars(
                     mfe_r=mfe_r,
                     mae_r=mae_r,
                     net_r_timeout=(entry.executed_entry - float(future.iloc[-1]["close"])) / risk,
-                    minutes_to_tp_or_sl=i * 15,
+                    minutes_to_tp_or_sl=i * trigger_minutes,
                     exit_ts=int(future.index[i - 1].timestamp() * 1000),
                     executed_exit=stop,
                     path_source="trade_bars",
@@ -516,7 +536,7 @@ def simulate_with_trade_bars(
                     mfe_r=mfe_r,
                     mae_r=mae_r,
                     net_r_timeout=(entry.executed_entry - float(future.iloc[-1]["close"])) / risk,
-                    minutes_to_tp_or_sl=i * 15,
+                    minutes_to_tp_or_sl=i * trigger_minutes,
                     exit_ts=int(future.index[i - 1].timestamp() * 1000),
                     executed_exit=executed_tp,
                     path_source="trade_bars",

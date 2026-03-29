@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -126,7 +127,16 @@ class TrainedCalibratedModel:
             return np.array([], dtype=float)
         if self.constant_probability is not None:
             return np.full(len(frame), self.constant_probability, dtype=float)
-        raw = self.estimator.predict_proba(frame[self.feature_columns])[:, 1]
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=".*encountered in matmul.*",
+                category=RuntimeWarning,
+                module=r"sklearn\..*",
+            )
+            raw = self.estimator.predict_proba(frame[self.feature_columns])[:, 1]
+        if not np.isfinite(raw).all():
+            raise ValueError(f"Non-finite raw predicted probabilities for model {self.model_key}")
         raw = np.clip(raw, EPS, 1.0 - EPS)
         if self.calibrator is None:
             return raw
@@ -134,7 +144,17 @@ class TrainedCalibratedModel:
             return np.clip(np.asarray(self.calibrator.predict(raw), dtype=float), EPS, 1.0 - EPS)
         if self.calibrator_kind == "sigmoid":
             logits = np.log(raw / (1.0 - raw)).reshape(-1, 1)
-            return np.clip(self.calibrator.predict_proba(logits)[:, 1], EPS, 1.0 - EPS)
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=".*encountered in matmul.*",
+                    category=RuntimeWarning,
+                    module=r"sklearn\..*",
+                )
+                calibrated = self.calibrator.predict_proba(logits)[:, 1]
+            if not np.isfinite(calibrated).all():
+                raise ValueError(f"Non-finite calibrated probabilities for model {self.model_key}")
+            return np.clip(calibrated, EPS, 1.0 - EPS)
         return raw
 
 
@@ -278,7 +298,7 @@ def _build_estimator(model_key: str) -> Any:
             steps=[
                 ("imputer", SimpleImputer(strategy="median")),
                 ("scaler", StandardScaler()),
-                ("model", LogisticRegression(class_weight="balanced", max_iter=2000)),
+                ("model", LogisticRegression(class_weight="balanced", max_iter=2000, solver="liblinear")),
             ]
         )
     if model_key == "challenger":
@@ -310,8 +330,15 @@ def _fit_sigmoid_calibrator(raw_proba: np.ndarray, y: np.ndarray) -> LogisticReg
         return None
     clipped = np.clip(raw_proba, EPS, 1.0 - EPS)
     logits = np.log(clipped / (1.0 - clipped)).reshape(-1, 1)
-    model = LogisticRegression(max_iter=1000)
-    model.fit(logits, y)
+    model = LogisticRegression(max_iter=1000, solver="liblinear")
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=".*encountered in matmul.*",
+            category=RuntimeWarning,
+            module=r"sklearn\..*",
+        )
+        model.fit(logits, y)
     return model
 
 
@@ -391,7 +418,14 @@ def train_calibrated_model(
         )
 
     estimator = _build_estimator(model_key)
-    estimator.fit(train[kept_features], y_train)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=".*encountered in matmul.*",
+            category=RuntimeWarning,
+            module=r"sklearn\..*",
+        )
+        estimator.fit(train[kept_features], y_train)
     if len(calibrate) == 0:
         return TrainedCalibratedModel(
             model_key,
@@ -403,6 +437,8 @@ def train_calibrated_model(
         )
 
     raw = estimator.predict_proba(calibrate[kept_features])[:, 1]
+    if not np.isfinite(raw).all():
+        raise ValueError(f"Non-finite calibration probabilities for model {model_key}")
     raw = np.clip(raw, EPS, 1.0 - EPS)
     calibrator_kind, calibrator = _fit_calibrator(raw, y_cal, calibration_order)
     return TrainedCalibratedModel(
@@ -606,8 +642,15 @@ def _calibration_slope_intercept(y: np.ndarray, p: np.ndarray) -> tuple[float | 
     clipped = np.clip(p, EPS, 1.0 - EPS)
     logits = np.log(clipped / (1.0 - clipped)).reshape(-1, 1)
     try:
-        model = LogisticRegression(max_iter=1000)
-        model.fit(logits, y)
+        model = LogisticRegression(max_iter=1000, solver="liblinear")
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=".*encountered in matmul.*",
+                category=RuntimeWarning,
+                module=r"sklearn\..*",
+            )
+            model.fit(logits, y)
         return float(model.coef_[0][0]), float(model.intercept_[0])
     except Exception:
         return None, None
@@ -628,7 +671,10 @@ def evaluate_predictions(
     cooldown_minutes: int,
 ) -> EvaluationResult:
     working = frame.copy()
-    working["p"] = np.asarray(probabilities, dtype=float)
+    p = np.asarray(probabilities, dtype=float)
+    if not np.isfinite(p).all():
+        raise ValueError(f"Non-finite predicted probabilities for experiment {experiment_id} model {model_key}")
+    working["p"] = p
     event_selected = working[working["p"] >= threshold].sort_values("ts")
     portfolio_selected = _apply_portfolio_policy(
         event_selected,
@@ -1125,8 +1171,16 @@ def run_walkforward_experiments(
             )
         all_results.extend(outer_results)
         all_results.extend(final_results)
-        candidate_side_counts = dict(pd.Series([c.side for c in dataset.candidates]).value_counts().sort_index()) if dataset.candidates else {}
-        label_side_counts = dict(dataset.labels["side"].value_counts().sort_index()) if not dataset.labels.empty and "side" in dataset.labels.columns else {}
+        candidate_side_counts = (
+            {str(key): int(value) for key, value in pd.Series([c.side for c in dataset.candidates]).value_counts().sort_index().items()}
+            if dataset.candidates
+            else {}
+        )
+        label_side_counts = (
+            {str(key): int(value) for key, value in dataset.labels["side"].value_counts().sort_index().items()}
+            if not dataset.labels.empty and "side" in dataset.labels.columns
+            else {}
+        )
         bundles.append(ExperimentRunBundle(dataset.experiment_id, dataset.generator, dataset.blocks, len(dataset.frame), None, outer_results, final_results, None, candidate_side_counts, label_side_counts))
 
     results_frame = _result_frame(all_results)

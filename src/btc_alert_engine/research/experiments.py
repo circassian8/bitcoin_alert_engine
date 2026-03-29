@@ -189,7 +189,10 @@ def _to_label_frame(labels: list) -> pd.DataFrame:
     timeout_mask = df["outcome"] == "timeout"
     df.loc[tp_mask, "realized_r"] = df.loc[tp_mask, "target_r_multiple"].astype(float)
     df.loc[timeout_mask, "realized_r"] = df.loc[timeout_mask, "net_r_24h_timeout"].astype(float)
-    df["holding_minutes"] = df["minutes_to_tp_or_sl"].fillna(df["timeout_bars"].astype(float) * 15.0)
+    timeout_minutes = df["module"].map(_trigger_minutes_for_module).astype(float)
+    holding_minutes = pd.to_numeric(df["minutes_to_tp_or_sl"], errors="coerce")
+    timeout_holding = df["timeout_bars"].astype(float) * timeout_minutes
+    df["holding_minutes"] = holding_minutes.where(holding_minutes.notna(), timeout_holding)
     return df
 
 
@@ -209,6 +212,13 @@ def _to_candidate_frame(candidates: list[CandidateEvent]) -> pd.DataFrame:
         rows.append(row)
     df = pd.DataFrame(rows).sort_values("ts")
     return df
+
+
+def _trigger_minutes_for_module(module_name: object) -> int:
+    try:
+        return profile_for_generator(str(module_name)).trigger_minutes
+    except Exception:
+        return 15
 
 
 def _merge_feature_blocks(base: pd.DataFrame, derived_dir: Path, symbol: str, blocks: list[str]) -> tuple[pd.DataFrame, ExperimentAvailability]:
@@ -264,7 +274,7 @@ def derive_candidate_config(experiment: dict[str, Any]) -> ExperimentCandidateCo
     if not sides:
         sides = ["long"]
     return ExperimentCandidateConfig(
-        require_regime_gate="regime_bybit" in blocks,
+        require_regime_gate=any(block in {"regime_bybit", "regime_bybit_fast"} for block in blocks),
         require_crowding_veto="crowding_bybit_veto" in blocks,
         require_micro_gate="micro_bybit_gate" in blocks,
         require_macro_veto="macro_veto" in blocks,

@@ -21,3 +21,12 @@ def test_load_feature_contracts() -> None:
 
 def test_default_reports_root_uses_top_level_reports_dir() -> None:
     assert default_reports_root("./data-pilot-long") == Path("reports") / "data-pilot-long"
+
+
+def test_symmetric_registries_include_reversal_experiment() -> None:
+    root = Path(__file__).resolve().parents[1]
+    for registry_name in ("research_registry_smoke_symmetric.yaml", "research_registry_broad_test_symmetric.yaml"):
+        registry = load_research_registry(root / registry_name)
+        reversal = [exp for exp in registry.experiments if exp["generator"] == "stress_reversal_v0"]
+        assert reversal, registry_name
+        assert reversal[0]["sides"] == ["long", "short"], registry_name

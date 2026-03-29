@@ -2,7 +2,9 @@ from pathlib import Path
 
 from btc_alert_engine.features.bybit_foundation import build_regime_features, build_trend_features
 from btc_alert_engine.materialize.bybit_foundation import materialize_bybit_bars
-from btc_alert_engine.schemas import CrowdingFeatureSnapshot, MicroFeatureSnapshot, PriceBar, RawEvent, RegimeFeatureSnapshot, TrendFeatureSnapshot
+from btc_alert_engine.research.experiments import _to_label_frame, derive_candidate_config
+from btc_alert_engine.research.labeling import label_candidates
+from btc_alert_engine.schemas import CandidateEvent, CrowdingFeatureSnapshot, MicroFeatureSnapshot, PriceBar, RawEvent, RegimeFeatureSnapshot, TrendFeatureSnapshot
 from btc_alert_engine.storage.raw_ndjson import RawEventWriter
 from btc_alert_engine.strategy.bybit_candidates import build_continuation_candidates
 
@@ -166,3 +168,66 @@ def test_fast_continuation_candidates_use_fast_module_and_timeout() -> None:
     candidate = candidates[-1]
     assert candidate.module == "continuation_v1_fast"
     assert candidate.timeout_bars == 288
+
+
+def test_fast_regime_block_enables_regime_gate() -> None:
+    config = derive_candidate_config(
+        {
+            "generator": "continuation_v1_fast",
+            "blocks": ["trend_bybit_fast", "regime_bybit_fast"],
+            "sides": ["long", "short"],
+        }
+    )
+    assert config.require_regime_gate is True
+
+
+def test_fast_label_candidates_use_5m_bar_timing() -> None:
+    bars = [
+        PriceBar(ts=1_000, symbol="BTCUSDT", interval="5", open=100.0, high=100.2, low=99.8, close=100.0, volume=10, turnover=1000),
+        PriceBar(ts=301_000, symbol="BTCUSDT", interval="5", open=100.0, high=102.5, low=99.9, close=102.0, volume=10, turnover=1000),
+    ]
+    candidate = CandidateEvent(
+        ts=1_000,
+        venue="bybit",
+        symbol="BTCUSDT",
+        module="continuation_v1_fast",
+        side="long",
+        entry=100.0,
+        stop=99.0,
+        tp=102.0,
+        target_r_multiple=2.0,
+        timeout_bars=288,
+        rule_reasons=["test"],
+        veto_reasons=[],
+    )
+
+    labels = label_candidates([candidate], bars, slippage_bps=0.0)
+    assert labels
+    assert labels[0].minutes_to_tp_or_sl == 5
+
+
+def test_fast_timeout_holding_minutes_use_5m_bars() -> None:
+    bars = [
+        PriceBar(ts=1_000, symbol="BTCUSDT", interval="5", open=100.0, high=100.1, low=99.9, close=100.0, volume=10, turnover=1000),
+        PriceBar(ts=301_000, symbol="BTCUSDT", interval="5", open=100.0, high=100.1, low=99.9, close=100.0, volume=10, turnover=1000),
+        PriceBar(ts=601_000, symbol="BTCUSDT", interval="5", open=100.0, high=100.1, low=99.9, close=100.0, volume=10, turnover=1000),
+    ]
+    candidate = CandidateEvent(
+        ts=1_000,
+        venue="bybit",
+        symbol="BTCUSDT",
+        module="continuation_v1_fast",
+        side="long",
+        entry=100.0,
+        stop=95.0,
+        tp=110.0,
+        target_r_multiple=2.0,
+        timeout_bars=2,
+        rule_reasons=["test"],
+        veto_reasons=[],
+    )
+
+    labels = label_candidates([candidate], bars, slippage_bps=0.0)
+    assert labels
+    frame = _to_label_frame(labels)
+    assert float(frame.iloc[0]["holding_minutes"]) == 10.0

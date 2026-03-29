@@ -162,7 +162,7 @@ labeling:
   barrier_simulation:
     preferred: sequential_first_touch_from_raw_bybit_quotes_and_trades
     fallback: 1s_micro_bucket_extrema_with_conservative_stop_first_if_order_inside_bucket_is_unknown
-    final_fallback: 15m_trade_bars
+    final_fallback: 5m_trade_bars
   timeout_15m_bars_by_module:
     continuation_v1: 96
     stress_reversal_v0: 32
