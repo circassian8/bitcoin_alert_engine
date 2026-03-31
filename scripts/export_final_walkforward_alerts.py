@@ -9,7 +9,11 @@ import pandas as pd
 
 from btc_alert_engine.config import default_reports_root, load_research_registry
 from btc_alert_engine.research.execution import build_raw_execution_tape
-from btc_alert_engine.research.experiments import build_experiment_event_frame, feature_columns_for_experiment
+from btc_alert_engine.research.experiments import (
+    build_experiment_event_frame,
+    feature_columns_for_experiment,
+    fee_bps_per_side_from_registry,
+)
 from btc_alert_engine.research.walkforward import (
     _apply_portfolio_policy,
     _portfolio_settings,
@@ -88,7 +92,7 @@ def _enrich(frame: pd.DataFrame, *, notional_usd: float | None) -> pd.DataFrame:
     out["equity_peak_r"] = out["cumulative_r"].cummax()
     out["drawdown_r"] = out["equity_peak_r"] - out["cumulative_r"]
     if {"executed_entry", "stop_y"}.issubset(out.columns):
-        out["signal_risk"] = out["executed_entry"] - out["stop_y"]
+        out["signal_risk"] = (out["executed_entry"] - out["stop_y"]).abs()
         out["risk_pct"] = out["signal_risk"] / out["executed_entry"]
         if notional_usd is not None:
             out["notional_usd"] = float(notional_usd)
@@ -137,6 +141,7 @@ def main() -> None:
     portfolio_mode, selection_policy, cooldown_minutes = _portfolio_settings(registry.goal)
     final_split = make_final_split(registry.validation)
     latency_ms = int(registry.labeling.get("latency_ms", 0))
+    fee_bps_per_side = fee_bps_per_side_from_registry(registry)
     notional_usd = _first_notional(registry, args.notional_usd)
 
     derived_dir = data_root / "derived"
@@ -170,6 +175,7 @@ def main() -> None:
             raw_tape=raw_tape,
             slippage_bps=args.slippage_bps,
             latency_ms=latency_ms,
+            fee_bps_per_side=fee_bps_per_side,
             skip_missing=True,
         )
         if dataset.skip_reason or dataset.frame.empty:

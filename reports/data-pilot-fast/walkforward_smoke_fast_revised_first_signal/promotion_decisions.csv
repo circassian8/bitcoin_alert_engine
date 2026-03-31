@@ -1,0 +1,5 @@
+experiment_id,selected_model,parent_experiment,promote,reason
+S2_current_fast_crowding_feature,,,False,no_model_selected
+F1_setup_anchor_smallbuf_tp125,,,False,no_model_selected
+F2_setup_anchor_modbuf_tp150,,,False,no_model_selected
+F3_setup_anchor_modbuf_tp125,,,False,no_model_selected

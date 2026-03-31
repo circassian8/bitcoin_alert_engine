@@ -18,6 +18,9 @@ _INTERVAL_CODE_TO_MINUTES: dict[str, int] = {
 }
 
 
+VALID_STOP_ANCHOR_MODES = {"trigger_pivot", "setup_anchor", "wider_of_setup_or_trigger"}
+
+
 def interval_code_to_label(interval_code: str) -> str:
     if interval_code == "60":
         return "1h"
@@ -56,6 +59,9 @@ class StrategyProfile:
     atr_percentile_days: int = 90
     continuation_timeout_bars: int = 96
     stress_timeout_bars: int = 32
+    continuation_stop_anchor_mode: str = "trigger_pivot"
+    continuation_stop_buffer_atr_trigger: float = 0.25
+    continuation_one_trigger_per_setup: bool = False
 
     @property
     def trigger_interval_label(self) -> str:
@@ -69,6 +75,13 @@ class StrategyProfile:
     @property
     def trigger_minutes(self) -> int:
         return _INTERVAL_CODE_TO_MINUTES[self.trigger_interval_code]
+
+    @property
+    def setup_minutes(self) -> int:
+        rule = self.setup_resample_rule.lower().replace("min", "")
+        if rule.endswith("h"):
+            return int(rule[:-1]) * 60
+        return int(rule)
 
     @property
     def regime_minutes(self) -> int:
@@ -102,6 +115,9 @@ CORE_PROFILE = StrategyProfile(
     regime_interval_label="4h",
     continuation_timeout_bars=96,
     stress_timeout_bars=32,
+    continuation_stop_anchor_mode="trigger_pivot",
+    continuation_stop_buffer_atr_trigger=0.25,
+    continuation_one_trigger_per_setup=False,
 )
 
 FAST_PROFILE = StrategyProfile(
@@ -114,8 +130,14 @@ FAST_PROFILE = StrategyProfile(
     regime_resample_rule="1h",
     setup_interval_label="15m",
     regime_interval_label="1h",
+    setup_active_bars=8,
+    trigger_pivot_lookback=6,
+    regime_slope_lookback=8,
     continuation_timeout_bars=288,
     stress_timeout_bars=96,
+    continuation_stop_anchor_mode="setup_anchor",
+    continuation_stop_buffer_atr_trigger=0.15,
+    continuation_one_trigger_per_setup=True,
 )
 
 

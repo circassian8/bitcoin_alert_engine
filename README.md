@@ -190,6 +190,18 @@ A faster compressed-timeframe challenger is also included:
 - `scripts/run_real_data_smoke_walkforward_fast_symmetric.sh`
 - `scripts/run_real_data_broad_walkforward_fast_symmetric.sh`
 
+Refined fast-continuation experiment bundles are also included. These keep the same report layout and manifest-driven exports while testing setup-anchored stops, one-trigger-per-setup behavior, and lower fast target multiples under both overlap policies:
+- `research_registry_smoke_fast_revised_first_signal.yaml`
+- `research_registry_smoke_fast_revised_highest_probability.yaml`
+- `research_registry_broad_test_fast_revised_first_signal.yaml`
+- `research_registry_broad_test_fast_revised_highest_probability.yaml`
+- `scripts/run_real_data_smoke_walkforward_fast_revised_first_signal.sh`
+- `scripts/run_real_data_smoke_walkforward_fast_revised_highest_probability.sh`
+- `scripts/run_real_data_broad_walkforward_fast_revised_first_signal.sh`
+- `scripts/run_real_data_broad_walkforward_fast_revised_highest_probability.sh`
+- `scripts/run_real_data_fast_revised_suite.sh`
+- `scripts/postprocess_fast_revised_results.py`
+
 
 ## Verification
 

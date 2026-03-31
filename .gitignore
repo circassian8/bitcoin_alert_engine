@@ -22,9 +22,7 @@ venv/
 .env.*
 .ipynb_checkpoints/
 
-# Research outputs and large local datasets
-/data*/
-/reports/
+# Local downloads
 /downloads/
 
 # Local run state

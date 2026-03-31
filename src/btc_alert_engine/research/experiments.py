@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from pathlib import Path
 from typing import Any, Iterable
@@ -113,12 +113,8 @@ class ExperimentCandidateConfig:
     require_macro_veto: bool = False
     stop_width_multiplier: float = 1.0
     target_r_multiple: float = 2.0
-    min_impulse_atr: float = 1.0
-    pullback_depth_min: float = 0.20
-    pullback_depth_max: float = 0.60
-    bounce_depth_min: float = 0.20
-    bounce_depth_max: float = 0.60
     sides: tuple[str, ...] = ("long",)
+    generator_params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -184,16 +180,46 @@ def load_trade_bars(derived_dir: Path, symbol: str, *, interval_label: str) -> l
     return load_price_bars([path])
 
 
-def _to_label_frame(labels: list) -> pd.DataFrame:
+def fee_bps_per_side_from_registry(registry: object, scenario: str = "base") -> float:
+    execution_costs = getattr(registry, "execution_costs", {}) or {}
+    if not hasattr(execution_costs, "get"):
+        return 0.0
+    fee_bps = 0.0
+    scenario_config = execution_costs.get(scenario, {}) or {}
+    if hasattr(scenario_config, "get"):
+        fee_bps = scenario_config.get("fee_bps_per_side", 0.0)
+    elif "fee_bps_per_side" in execution_costs:
+        fee_bps = execution_costs.get("fee_bps_per_side", 0.0)
+    try:
+        fee_bps = float(fee_bps)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(fee_bps) or fee_bps <= 0:
+        return 0.0
+    return fee_bps
+
+
+def _to_label_frame(labels: list, *, fee_bps_per_side: float = 0.0) -> pd.DataFrame:
     if not labels:
         return pd.DataFrame()
     df = pd.DataFrame([label.model_dump(mode="json") for label in labels]).sort_values("ts")
     df["y"] = df["tp_before_sl_within_horizon"].astype(int)
-    df["realized_r"] = -1.0
+    df["gross_realized_r"] = -1.0
     tp_mask = df["outcome"] == "tp"
     timeout_mask = df["outcome"] == "timeout"
-    df.loc[tp_mask, "realized_r"] = df.loc[tp_mask, "target_r_multiple"].astype(float)
-    df.loc[timeout_mask, "realized_r"] = df.loc[timeout_mask, "net_r_24h_timeout"].astype(float)
+    df.loc[tp_mask, "gross_realized_r"] = df.loc[tp_mask, "target_r_multiple"].astype(float)
+    df.loc[timeout_mask, "gross_realized_r"] = df.loc[timeout_mask, "net_r_24h_timeout"].astype(float)
+    df["fee_r"] = 0.0
+    if fee_bps_per_side > 0:
+        executed_entry = pd.to_numeric(df.get("executed_entry"), errors="coerce")
+        executed_exit = pd.to_numeric(df.get("executed_exit"), errors="coerce")
+        stop_col = "stop_y" if "stop_y" in df.columns else "stop"
+        stop_level = pd.to_numeric(df.get(stop_col), errors="coerce")
+        signal_risk = (executed_entry - stop_level).abs()
+        fee_rate = float(fee_bps_per_side) / 10_000.0
+        valid_fee = signal_risk.gt(0) & executed_entry.notna() & executed_exit.notna()
+        df.loc[valid_fee, "fee_r"] = ((executed_entry[valid_fee].abs() + executed_exit[valid_fee].abs()) * fee_rate) / signal_risk[valid_fee]
+    df["realized_r"] = df["gross_realized_r"] - df["fee_r"]
     timeout_minutes = df["module"].map(_trigger_minutes_for_module).astype(float)
     holding_minutes = pd.to_numeric(df["minutes_to_tp_or_sl"], errors="coerce")
     timeout_holding = df["timeout_bars"].astype(float) * timeout_minutes
@@ -254,15 +280,20 @@ def _load_typed_features(derived_dir: Path, symbol: str, block_name: str) -> lis
 def derive_candidate_config(experiment: dict[str, Any]) -> ExperimentCandidateConfig:
     blocks = list(experiment.get("blocks", []))
     generator_params = dict(experiment.get("generator_params", {}) or {})
-    stop_width_multiplier = _float_param(generator_params.get("stop_width_multiplier"), 1.0, minimum=0.0)
-    target_r_multiple = _float_param(generator_params.get("target_r_multiple"), 2.0, minimum=0.0)
-    min_impulse_atr = _float_param(generator_params.get("min_impulse_atr"), 1.0, minimum=0.0)
-    pullback_depth_min, pullback_depth_max = _depth_range_params(generator_params, "pullback_depth", default=(0.20, 0.60))
-    bounce_depth_min, bounce_depth_max = _depth_range_params(
-        generator_params,
-        "bounce_depth",
-        default=(pullback_depth_min, pullback_depth_max),
-    )
+    stop_width_multiplier = generator_params.get("stop_width_multiplier", 1.0)
+    try:
+        stop_width_multiplier = float(stop_width_multiplier)
+    except (TypeError, ValueError):
+        stop_width_multiplier = 1.0
+    if not math.isfinite(stop_width_multiplier) or stop_width_multiplier <= 0:
+        stop_width_multiplier = 1.0
+    target_r_multiple = generator_params.get("target_r_multiple", 2.0)
+    try:
+        target_r_multiple = float(target_r_multiple)
+    except (TypeError, ValueError):
+        target_r_multiple = 2.0
+    if not math.isfinite(target_r_multiple) or target_r_multiple <= 0:
+        target_r_multiple = 2.0
     requested_sides = experiment.get("sides") or ["long"]
     sides: list[str] = []
     for side in requested_sides:
@@ -273,68 +304,19 @@ def derive_candidate_config(experiment: dict[str, Any]) -> ExperimentCandidateCo
             sides.append(value)
     if not sides:
         sides = ["long"]
-    require_regime_gate = any(block in {"regime_bybit", "regime_bybit_fast"} for block in blocks)
-    require_crowding_veto = "crowding_bybit_veto" in blocks
-    require_micro_gate = "micro_bybit_gate" in blocks
-    require_macro_veto = "macro_veto" in blocks
-    require_regime_gate = _bool_param(generator_params.get("require_regime_gate"), require_regime_gate)
-    require_crowding_veto = _bool_param(generator_params.get("require_crowding_veto"), require_crowding_veto)
-    require_micro_gate = _bool_param(generator_params.get("require_micro_gate"), require_micro_gate)
-    require_macro_veto = _bool_param(generator_params.get("require_macro_veto"), require_macro_veto)
+    sanitized_generator_params = dict(generator_params)
+    sanitized_generator_params.setdefault("stop_width_multiplier", stop_width_multiplier)
+    sanitized_generator_params.setdefault("target_r_multiple", target_r_multiple)
     return ExperimentCandidateConfig(
-        require_regime_gate=require_regime_gate,
-        require_crowding_veto=require_crowding_veto,
-        require_micro_gate=require_micro_gate,
-        require_macro_veto=require_macro_veto,
+        require_regime_gate=any(block in {"regime_bybit", "regime_bybit_fast"} for block in blocks),
+        require_crowding_veto="crowding_bybit_veto" in blocks,
+        require_micro_gate="micro_bybit_gate" in blocks,
+        require_macro_veto="macro_veto" in blocks,
         stop_width_multiplier=stop_width_multiplier,
         target_r_multiple=target_r_multiple,
-        min_impulse_atr=min_impulse_atr,
-        pullback_depth_min=pullback_depth_min,
-        pullback_depth_max=pullback_depth_max,
-        bounce_depth_min=bounce_depth_min,
-        bounce_depth_max=bounce_depth_max,
         sides=tuple(sides),
+        generator_params=sanitized_generator_params,
     )
-
-
-def _float_param(value: object, default: float, *, minimum: float | None = None, maximum: float | None = None) -> float:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return default
-    if not math.isfinite(parsed):
-        return default
-    if minimum is not None and parsed <= minimum:
-        return default
-    if maximum is not None and parsed >= maximum:
-        return default
-    return parsed
-
-
-def _bool_param(value: object, default: bool) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "on"}:
-        return True
-    if text in {"0", "false", "no", "off"}:
-        return False
-    return default
-
-
-def _depth_range_params(generator_params: dict[str, Any], prefix: str, *, default: tuple[float, float]) -> tuple[float, float]:
-    range_value = generator_params.get(f"{prefix}_range")
-    if isinstance(range_value, (list, tuple)) and len(range_value) == 2:
-        low = _float_param(range_value[0], default[0], minimum=-1.0)
-        high = _float_param(range_value[1], default[1], minimum=-1.0)
-    else:
-        low = _float_param(generator_params.get(f"{prefix}_min"), default[0], minimum=-1.0)
-        high = _float_param(generator_params.get(f"{prefix}_max"), default[1], minimum=-1.0)
-    if low < 0 or high <= low:
-        return default
-    return (low, high)
 
 
 def _load_generator_inputs(
@@ -386,6 +368,7 @@ def build_experiment_event_frame(
     raw_tape: pd.DataFrame | None = None,
     slippage_bps: float = 1.0,
     latency_ms: int = 0,
+    fee_bps_per_side: float = 0.0,
     skip_missing: bool = True,
 ) -> ExperimentDataset:
     experiment_id = str(experiment["id"])
@@ -420,12 +403,8 @@ def build_experiment_event_frame(
             macro_features=generator_inputs["macro"],
             stop_width_multiplier=config.stop_width_multiplier,
             target_r_multiple=config.target_r_multiple,
-            min_impulse_atr=config.min_impulse_atr,
-            pullback_depth_min=config.pullback_depth_min,
-            pullback_depth_max=config.pullback_depth_max,
-            bounce_depth_min=config.bounce_depth_min,
-            bounce_depth_max=config.bounce_depth_max,
             sides=config.sides,
+            generator_params=config.generator_params,
             profile=profile,
         )
     elif generator in {CORE_PROFILE.stress_reversal_module, FAST_PROFILE.stress_reversal_module}:
@@ -457,7 +436,7 @@ def build_experiment_event_frame(
         slippage_bps=slippage_bps,
         latency_ms=latency_ms,
     )
-    label_frame = _to_label_frame(labels)
+    label_frame = _to_label_frame(labels, fee_bps_per_side=fee_bps_per_side)
     if label_frame.empty:
         return ExperimentDataset(experiment_id, generator, blocks, pd.DataFrame(), candidates, label_frame, skip_reason="no_labels")
 

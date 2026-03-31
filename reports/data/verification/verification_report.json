@@ -1,0 +1,201 @@
+{
+  "static_checks": [],
+  "block_statuses": [
+    {
+      "block": "trend_bybit",
+      "exists": true,
+      "rows": 19747,
+      "monotonic_ts": true,
+      "unique_ts": true,
+      "parse_errors": 0
+    },
+    {
+      "block": "regime_bybit",
+      "exists": true,
+      "rows": 19747,
+      "monotonic_ts": true,
+      "unique_ts": true,
+      "parse_errors": 0
+    },
+    {
+      "block": "crowding_bybit_feature",
+      "exists": true,
+      "rows": 19777,
+      "monotonic_ts": true,
+      "unique_ts": true,
+      "parse_errors": 0
+    },
+    {
+      "block": "crowding_bybit_veto",
+      "exists": true,
+      "rows": 19777,
+      "monotonic_ts": true,
+      "unique_ts": true,
+      "parse_errors": 0
+    },
+    {
+      "block": "micro_bybit_score",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0
+    },
+    {
+      "block": "micro_bybit_gate",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0
+    },
+    {
+      "block": "options_deribit",
+      "exists": true,
+      "rows": 19747,
+      "monotonic_ts": true,
+      "unique_ts": true,
+      "parse_errors": 0
+    },
+    {
+      "block": "options_glassnode",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0
+    },
+    {
+      "block": "onchain_glassnode",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0
+    },
+    {
+      "block": "onchain_cryptoquant",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0
+    },
+    {
+      "block": "aggregate_derivs_coinglass",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0
+    },
+    {
+      "block": "macro_veto",
+      "exists": true,
+      "rows": 19747,
+      "monotonic_ts": true,
+      "unique_ts": true,
+      "parse_errors": 0
+    }
+  ],
+  "execution_tape_status": {
+    "exists": true,
+    "rows": 0,
+    "gap_count": 0,
+    "out_of_order_count": 0,
+    "state_error_count": 0
+  },
+  "experiment_statuses": [
+    {
+      "experiment_id": "A0_native_continuation",
+      "skip_reason": null,
+      "rows": 20,
+      "candidate_count": 20,
+      "label_count": 20
+    },
+    {
+      "experiment_id": "A1_native_plus_soft_regime",
+      "skip_reason": null,
+      "rows": 20,
+      "candidate_count": 20,
+      "label_count": 20
+    },
+    {
+      "experiment_id": "A2_native_plus_bybit_crowding_feature",
+      "skip_reason": null,
+      "rows": 20,
+      "candidate_count": 20,
+      "label_count": 20
+    },
+    {
+      "experiment_id": "A3_native_plus_bybit_crowding_veto",
+      "skip_reason": null,
+      "rows": 20,
+      "candidate_count": 20,
+      "label_count": 20
+    },
+    {
+      "experiment_id": "A4_native_plus_micro_score",
+      "skip_reason": null,
+      "rows": 20,
+      "candidate_count": 20,
+      "label_count": 20
+    },
+    {
+      "experiment_id": "A5_native_plus_micro_gate",
+      "skip_reason": "no_candidates",
+      "rows": 0,
+      "candidate_count": 0,
+      "label_count": 0
+    },
+    {
+      "experiment_id": "A6_plus_deribit_options",
+      "skip_reason": null,
+      "rows": 20,
+      "candidate_count": 20,
+      "label_count": 20
+    },
+    {
+      "experiment_id": "A7_plus_glassnode_options",
+      "skip_reason": null,
+      "rows": 20,
+      "candidate_count": 20,
+      "label_count": 20
+    },
+    {
+      "experiment_id": "A8_plus_macro_veto",
+      "skip_reason": null,
+      "rows": 20,
+      "candidate_count": 20,
+      "label_count": 20
+    },
+    {
+      "experiment_id": "A9_plus_glassnode_onchain",
+      "skip_reason": null,
+      "rows": 20,
+      "candidate_count": 20,
+      "label_count": 20
+    },
+    {
+      "experiment_id": "A10_plus_coinglass_overlay",
+      "skip_reason": null,
+      "rows": 20,
+      "candidate_count": 20,
+      "label_count": 20
+    },
+    {
+      "experiment_id": "A11_cryptoquant_instead_of_glassnode",
+      "skip_reason": null,
+      "rows": 20,
+      "candidate_count": 20,
+      "label_count": 20
+    },
+    {
+      "experiment_id": "R1_stress_reversal",
+      "skip_reason": "no_candidates",
+      "rows": 0,
+      "candidate_count": 0,
+      "label_count": 0
+    }
+  ]
+}

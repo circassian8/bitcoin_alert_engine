@@ -120,8 +120,8 @@ candidate_generators:
       - ema50_slope_4h_5bars > 0
       setup:
       - breakout_above_prior_20bar_high_1h_within_last_10bars
-      - impulse_size_1h >= 1.0 * atr_1h
-      - pullback_depth_frac in [0.20, 0.60]
+      - impulse_size_1h >= 0.7 * atr_1h
+      - pullback_depth_frac in [0.15, 0.70]
       - pullback_low > breakout_level - 0.25 * atr_1h
       - pullback_low > ema50_4h
       trigger:
@@ -154,7 +154,7 @@ labeling:
   - net_r_24h_timeout
   - minutes_to_tp_or_sl
   take_profit_r_by_module:
-    continuation_v1: 2.0
+    continuation_v1: 1.5
     stress_reversal_v0: 1.5
   latency_ms: 0
   barrier_simulation:
@@ -179,23 +179,33 @@ experiments:
   generator: continuation_v1
   blocks:
   - trend_bybit
+  generator_params: &continuation_relaxed_params
+    min_impulse_atr: 0.7
+    pullback_depth_min: 0.15
+    pullback_depth_max: 0.70
+    bounce_depth_min: 0.15
+    bounce_depth_max: 0.70
+    target_r_multiple: 1.5
 - id: A1_native_plus_soft_regime
   generator: continuation_v1
   blocks:
   - trend_bybit
   - regime_bybit
+  generator_params: *continuation_relaxed_params
 - id: A2_native_plus_bybit_crowding_feature
   generator: continuation_v1
   blocks:
   - trend_bybit
   - regime_bybit
   - crowding_bybit_feature
+  generator_params: *continuation_relaxed_params
 - id: A3_native_plus_bybit_crowding_veto
   generator: continuation_v1
   blocks:
   - trend_bybit
   - regime_bybit
   - crowding_bybit_veto
+  generator_params: *continuation_relaxed_params
 - id: A4_native_plus_micro_score
   generator: continuation_v1
   blocks:
@@ -203,6 +213,7 @@ experiments:
   - regime_bybit
   - crowding_bybit_veto
   - micro_bybit_score
+  generator_params: *continuation_relaxed_params
 - id: A5_native_plus_micro_gate
   generator: continuation_v1
   blocks:
@@ -211,6 +222,7 @@ experiments:
   - crowding_bybit_veto
   - micro_bybit_score
   - micro_bybit_gate
+  generator_params: *continuation_relaxed_params
 - id: A6_plus_deribit_options
   generator: continuation_v1
   blocks:
@@ -219,6 +231,7 @@ experiments:
   - crowding_bybit_veto
   - micro_bybit_score
   - options_deribit
+  generator_params: *continuation_relaxed_params
 - id: A7_plus_glassnode_options
   generator: continuation_v1
   blocks:
@@ -227,6 +240,7 @@ experiments:
   - crowding_bybit_veto
   - micro_bybit_score
   - options_glassnode
+  generator_params: *continuation_relaxed_params
 - id: A8_plus_macro_veto
   generator: continuation_v1
   blocks:
@@ -236,6 +250,7 @@ experiments:
   - micro_bybit_score
   - options_deribit
   - macro_veto
+  generator_params: *continuation_relaxed_params
 - id: A9_plus_glassnode_onchain
   generator: continuation_v1
   blocks:
@@ -246,6 +261,7 @@ experiments:
   - options_deribit
   - macro_veto
   - onchain_glassnode
+  generator_params: *continuation_relaxed_params
 - id: A10_plus_coinglass_overlay
   generator: continuation_v1
   blocks:
@@ -256,6 +272,7 @@ experiments:
   - options_deribit
   - macro_veto
   - aggregate_derivs_coinglass
+  generator_params: *continuation_relaxed_params
 - id: A11_cryptoquant_instead_of_glassnode
   generator: continuation_v1
   blocks:
@@ -266,6 +283,7 @@ experiments:
   - options_deribit
   - macro_veto
   - onchain_cryptoquant
+  generator_params: *continuation_relaxed_params
 - id: R1_stress_reversal
   generator: stress_reversal_v0
   blocks:

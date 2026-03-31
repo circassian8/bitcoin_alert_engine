@@ -10,6 +10,7 @@ import pandas as pd
 
 VARIANT_COLORS = ["#1f4b99", "#2f855a", "#b7791f", "#c53030", "#6b46c1"]
 OUTCOME_ORDER = ["tp", "sl", "timeout"]
+CARD_WIDTH = 148
 
 
 def _load(csv_path: Path, label: str) -> pd.DataFrame:
@@ -61,22 +62,33 @@ def build_dashboard(frames: list[pd.DataFrame], *, title: str) -> alt.Chart:
     summary = _summary(frames)
     variants = list(dict.fromkeys(combined["variant"]))
     colors = VARIANT_COLORS[: len(variants)]
+    chart_width = max(len(summary["order"].drop_duplicates()) * CARD_WIDTH, 720)
 
     cards = (
         alt.Chart(summary)
         .mark_rect(cornerRadius=10, stroke="#d9e2ec", strokeWidth=1)
         .encode(
-            x=alt.X("order:O", axis=None, sort=list(summary["order"].drop_duplicates())),
+            x=alt.X(
+                "order:O",
+                axis=None,
+                sort=list(summary["order"].drop_duplicates()),
+                scale=alt.Scale(paddingInner=0.08, paddingOuter=0.04),
+            ),
             y=alt.Y("variant:N", axis=alt.Axis(title=None)),
             color=alt.value("#f7fafc"),
         )
-        .properties(width=135, height=110, title=title)
+        .properties(width=chart_width, height=110, title=title)
     )
     card_metric = (
         alt.Chart(summary)
         .mark_text(dy=-10, fontSize=12, fontWeight="bold", color="#4a5568")
         .encode(
-            x=alt.X("order:O", axis=None, sort=list(summary["order"].drop_duplicates())),
+            x=alt.X(
+                "order:O",
+                axis=None,
+                sort=list(summary["order"].drop_duplicates()),
+                scale=alt.Scale(paddingInner=0.08, paddingOuter=0.04),
+            ),
             y="variant:N",
             text="metric:N",
         )
@@ -85,7 +97,12 @@ def build_dashboard(frames: list[pd.DataFrame], *, title: str) -> alt.Chart:
         alt.Chart(summary)
         .mark_text(dy=12, fontSize=17, fontWeight=700, color="#1a202c")
         .encode(
-            x=alt.X("order:O", axis=None, sort=list(summary["order"].drop_duplicates())),
+            x=alt.X(
+                "order:O",
+                axis=None,
+                sort=list(summary["order"].drop_duplicates()),
+                scale=alt.Scale(paddingInner=0.08, paddingOuter=0.04),
+            ),
             y="variant:N",
             text="label:N",
         )

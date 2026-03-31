@@ -16,6 +16,7 @@ from btc_alert_engine.research.experiments import (
     FEATURE_SCHEMA_MAP,
     build_experiment_event_frame,
     block_path,
+    fee_bps_per_side_from_registry,
 )
 from btc_alert_engine.storage.partitioned_ndjson import iter_json_records
 
@@ -47,6 +48,7 @@ class BlockDataStatus:
     monotonic_ts: bool
     unique_ts: bool
     parse_errors: int
+    missing_expected_fields: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -225,9 +227,12 @@ def inspect_derived_blocks(derived_dir: str | Path, symbol: str, contracts_path:
         rows = 0
         parse_errors = 0
         ts_values: list[int] = []
+        observed_fields: set[str] = set()
         model_cls = FEATURE_SCHEMA_MAP.get(block)
+        expected_fields = set(contracts.feature_blocks.get(block, {}).get("fields", []))
         for record in iter_json_records([path]):
             rows += 1
+            observed_fields.update(record.keys())
             try:
                 if model_cls is not None:
                     model_cls.model_validate(record)
@@ -236,7 +241,18 @@ def inspect_derived_blocks(derived_dir: str | Path, symbol: str, contracts_path:
                 parse_errors += 1
         monotonic = ts_values == sorted(ts_values) if ts_values else True
         unique_ts = len(ts_values) == len(set(ts_values)) if ts_values else True
-        statuses.append(BlockDataStatus(block=block, exists=True, rows=rows, monotonic_ts=monotonic, unique_ts=unique_ts, parse_errors=parse_errors))
+        missing_expected_fields = sorted(field for field in expected_fields if field not in observed_fields)
+        statuses.append(
+            BlockDataStatus(
+                block=block,
+                exists=True,
+                rows=rows,
+                monotonic_ts=monotonic,
+                unique_ts=unique_ts,
+                parse_errors=parse_errors,
+                missing_expected_fields=missing_expected_fields,
+            )
+        )
     return statuses
 
 
@@ -269,6 +285,7 @@ def inspect_experiments(
     if raw_paths:
         raw_tape, _ = build_raw_execution_tape(raw_paths, symbol=symbol, tolerate_gaps=True)
     latency_ms = int(registry.labeling.get("latency_ms", 0))
+    fee_bps_per_side = fee_bps_per_side_from_registry(registry)
     for experiment in registry.experiments:
         dataset = build_experiment_event_frame(
             Path(derived_dir),
@@ -278,6 +295,7 @@ def inspect_experiments(
             raw_tape=raw_tape,
             slippage_bps=slippage_bps,
             latency_ms=latency_ms,
+            fee_bps_per_side=fee_bps_per_side,
             skip_missing=False,
         )
         entry_source_counts = (
@@ -357,6 +375,15 @@ def generate_verification_report(
     report_statuses = inspect_report_manifests(reports_root or default_reports_root(data_dir), current_prov)
 
     block_map = {item.block: item for item in block_statuses}
+    for item in block_statuses:
+        if item.exists and item.missing_expected_fields:
+            static_checks.append(
+                StaticCheckResult(
+                    "warning",
+                    "block_missing_expected_fields",
+                    f"Feature block `{item.block}` is missing stored fields expected by current contracts: {', '.join(item.missing_expected_fields)}. Rebuild derived artifacts with current code before trusting no-candidate outcomes.",
+                )
+            )
     if execution_tape_status is not None and execution_tape_status.rows == 0:
         static_checks.append(
             StaticCheckResult(
@@ -469,10 +496,11 @@ def write_verification_artifacts(report: VerificationReport, output_dir: str | P
     if not report.block_statuses:
         lines.append("No block statuses were produced.")
     else:
-        lines.append("| block | exists | rows | monotonic ts | unique ts | parse errors |")
-        lines.append("|---|---:|---:|---:|---:|---:|")
+        lines.append("| block | exists | rows | monotonic ts | unique ts | parse errors | missing expected fields |")
+        lines.append("|---|---:|---:|---:|---:|---:|---|")
         for item in report.block_statuses:
-            lines.append(f"| {item.block} | {'yes' if item.exists else 'no'} | {item.rows} | {'yes' if item.monotonic_ts else 'no'} | {'yes' if item.unique_ts else 'no'} | {item.parse_errors} |")
+            missing_fields = ", ".join(item.missing_expected_fields) if item.missing_expected_fields else "-"
+            lines.append(f"| {item.block} | {'yes' if item.exists else 'no'} | {item.rows} | {'yes' if item.monotonic_ts else 'no'} | {'yes' if item.unique_ts else 'no'} | {item.parse_errors} | {missing_fields} |")
 
     lines.extend(["", "## Execution tape", ""])
     if report.execution_tape_status is None:

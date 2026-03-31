@@ -120,8 +120,8 @@ candidate_generators:
       - ema50_slope_4h_5bars > 0
       setup:
       - breakout_above_prior_20bar_high_1h_within_last_10bars
-      - impulse_size_1h >= 1.0 * atr_1h
-      - pullback_depth_frac in [0.20, 0.60]
+      - impulse_size_1h >= 0.7 * atr_1h
+      - pullback_depth_frac in [0.15, 0.70]
       - pullback_low > breakout_level - 0.25 * atr_1h
       - pullback_low > ema50_4h
       trigger:
@@ -154,7 +154,7 @@ labeling:
   - net_r_24h_timeout
   - minutes_to_tp_or_sl
   take_profit_r_by_module:
-    continuation_v1: 2.0
+    continuation_v1: 1.5
     stress_reversal_v0: 1.5
   latency_ms: 0
   barrier_simulation:
@@ -182,6 +182,13 @@ experiments:
   sides:
   - long
   - short
+  generator_params: &continuation_relaxed_params
+    min_impulse_atr: 0.7
+    pullback_depth_min: 0.15
+    pullback_depth_max: 0.70
+    bounce_depth_min: 0.15
+    bounce_depth_max: 0.70
+    target_r_multiple: 1.5
 - id: S1_native_plus_regime
   generator: continuation_v1
   blocks:
@@ -190,6 +197,7 @@ experiments:
   sides:
   - long
   - short
+  generator_params: *continuation_relaxed_params
 - id: S2_plus_crowding_feature
   generator: continuation_v1
   blocks:
@@ -199,6 +207,7 @@ experiments:
   sides:
   - long
   - short
+  generator_params: *continuation_relaxed_params
 - id: S3_plus_crowding_veto
   generator: continuation_v1
   blocks:
@@ -208,6 +217,7 @@ experiments:
   sides:
   - long
   - short
+  generator_params: *continuation_relaxed_params
 - id: R1_stress_reversal
   generator: stress_reversal_v0
   blocks:

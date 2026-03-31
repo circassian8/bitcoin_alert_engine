@@ -1,0 +1,299 @@
+program:
+  id: btc_bybit_alert_engine_smoke_fast_revised_first_signal_v1
+  version: 1
+  description: BTC-only smoke registry for revised fast 1h/15m/5m continuation variants
+    with first_signal portfolio selection
+execution:
+  venue: bybit
+  symbol: BTCUSDT
+  category: linear
+  mode: alert_first_manual_execution
+  market_truth: bybit_only
+goal:
+  primary_metric: expectancy_r_per_alert
+  secondary_metric: worst_20_trade_drawdown_r
+  calibration_metric: brier_score
+  alert_budgets_per_week:
+  - 1
+  - 3
+  production_budget_per_week: 3
+  portfolio_evaluation:
+    mode: one_position_at_a_time
+    selection_policy: first_signal
+    cooldown_minutes: 0
+timeframes:
+  micro: 1s
+  trigger: 5m
+  setup: 15m
+  regime: 1h
+data_sources:
+  strict:
+    bybit:
+      websocket:
+      - orderbook.200.BTCUSDT
+      - publicTrade.BTCUSDT
+      - allLiquidation.BTCUSDT
+      rest:
+      - kline
+      - index_price_kline
+      - premium_index_price_kline
+      - funding_history
+      - open_interest
+      - account_ratio
+      - instruments_info
+      - tickers
+    deribit:
+    - volatility_index
+    macro:
+    - fed_fomc
+    - bls_cpi
+    - bls_employment
+    - bea_gdp
+    - bea_pce
+    replay:
+      provider: tardis
+      exchange: bybit
+  soft:
+    glassnode_market:
+    - futures_open_interest
+    - futures_funding_rate
+    - futures_liquidations
+    - basis
+    - options_iv
+    - options_skew
+  mutable:
+    glassnode_onchain:
+    - exchange_balance
+    - exchange_netflow
+    - sopr
+    - nrpl
+    - etf_netflow
+    cryptoquant_onchain:
+    - reserve
+    - inflow
+    - outflow
+    - inflow_spot_exchange
+    - inflow_derivative_exchange
+  optional_aggregate:
+    coinglass:
+    - aggregated_open_interest
+    - aggregated_funding
+    - global_account_ratio
+pit_policy:
+  strict:
+    allowed_in:
+    - labels
+    - fills
+    - slippage_model
+    - live_entry_gate
+    - live_ranker
+    - backtests
+  soft:
+    allowed_in:
+    - regime_block
+    - live_ranker
+    - slow_context
+    forbidden_in:
+    - labels
+    - intrabar_entry_gate
+    conservative_backtest_lag:
+      glassnode_market: 2h
+      glassnode_options: 12h
+  mutable:
+    allowed_in:
+    - regime_block_only
+    - dashboard_only
+    forbidden_in:
+    - labels
+    - threshold_search
+    - intrabar_entry_gate
+    conservative_backtest_lag:
+      default: 24h
+candidate_generators:
+  continuation_v1_fast:
+    enabled: true
+    side: long
+    rules:
+      regime:
+      - close_1h > ema200_1h
+      - ema50_1h > ema200_1h
+      - ema50_slope_1h_5bars > 0
+      setup:
+      - breakout_above_prior_20bar_high_15m_within_last_10bars
+      - impulse_size_15m >= 0.7 * atr_15m
+      - pullback_depth_frac in [0.15, 0.70]
+      - pullback_low > breakout_level - 0.25 * atr_15m
+      - pullback_low > ema50_1h
+      trigger:
+      - close_5m > pullback_pivot_high
+  stress_reversal_v0_fast:
+    enabled: true
+    live_mode: log_only
+    side: long
+    rules:
+      stress:
+      - atr_pctile_90d >= 95 or liq_notional_1h_z >= 3 or abs(funding_z_7d) >= 3
+      trigger:
+      - sweep_below_prior_20bar_low_by_0.25_atr_5m
+      - same_candle_closes_above_midpoint
+      - next_5m_close_reclaims_local_swing_pivot
+labeling:
+  primary_label: tp_before_sl_within_horizon
+  entry_price:
+    preferred: first_best_ask_or_bid_from_next_1s_micro_bucket_after_trigger_close_plus_slippage
+    fallback: next_trade_bar_open_plus_slippage_if_micro_quotes_missing
+  stop_price:
+    continuation_long: pullback_low - 0.25 * atr_trigger
+    reversal_long: sweep_low - 0.20 * atr_15m
+  stop_loss_r: 1.0
+  timeout_15m_bars: 96
+  secondary_labels:
+  - tp1_before_sl_within_12h
+  - mfe_r_24h
+  - mae_r_24h
+  - net_r_24h_timeout
+  - minutes_to_tp_or_sl
+  take_profit_r_by_module:
+    continuation_v1: 1.5
+    stress_reversal_v0: 1.5
+    continuation_v1_fast: 1.5
+    stress_reversal_v0_fast: 1.5
+  latency_ms: 0
+  barrier_simulation:
+    preferred: sequential_first_touch_from_raw_bybit_quotes_and_trades
+    fallback: 1s_micro_bucket_extrema_with_conservative_stop_first_if_order_inside_bucket_is_unknown
+    final_fallback: 5m_trade_bars
+  timeout_15m_bars_by_module:
+    continuation_v1: 96
+    stress_reversal_v0: 32
+    continuation_v1_fast: 288
+    stress_reversal_v0_fast: 96
+models:
+  baseline:
+    type: logistic_regression
+    class_weight: balanced
+  challenger:
+    type: lightgbm
+  calibration:
+    order:
+    - isotonic
+    - sigmoid
+experiments:
+- id: S2_current_fast_crowding_feature
+  generator: continuation_v1_fast
+  blocks:
+  - trend_bybit_fast
+  - regime_bybit_fast
+  - crowding_bybit_feature
+  sides:
+  - long
+  - short
+  generator_params: &current_fast_s2_params
+    min_impulse_atr: 0.7
+    pullback_depth_min: 0.15
+    pullback_depth_max: 0.70
+    bounce_depth_min: 0.15
+    bounce_depth_max: 0.70
+    stop_anchor_mode: setup_anchor
+    stop_buffer_atr_trigger: 0.15
+    target_r_multiple: 1.5
+    one_trigger_per_setup: true
+- id: F1_setup_anchor_smallbuf_tp125
+  generator: continuation_v1_fast
+  blocks:
+  - trend_bybit_fast
+  - regime_bybit_fast
+  - crowding_bybit_feature
+  sides:
+  - long
+  - short
+  generator_params:
+    <<: *current_fast_s2_params
+    stop_anchor_mode: setup_anchor
+    stop_buffer_atr_trigger: 0.1
+    target_r_multiple: 1.25
+    one_trigger_per_setup: true
+- id: F2_setup_anchor_modbuf_tp150
+  generator: continuation_v1_fast
+  blocks:
+  - trend_bybit_fast
+  - regime_bybit_fast
+  - crowding_bybit_feature
+  sides:
+  - long
+  - short
+  generator_params:
+    <<: *current_fast_s2_params
+    stop_anchor_mode: setup_anchor
+    stop_buffer_atr_trigger: 0.2
+    target_r_multiple: 1.5
+    one_trigger_per_setup: true
+- id: F3_setup_anchor_modbuf_tp125
+  generator: continuation_v1_fast
+  blocks:
+  - trend_bybit_fast
+  - regime_bybit_fast
+  - crowding_bybit_feature
+  sides:
+  - long
+  - short
+  generator_params:
+    <<: *current_fast_s2_params
+    stop_anchor_mode: setup_anchor
+    stop_buffer_atr_trigger: 0.2
+    target_r_multiple: 1.25
+    one_trigger_per_setup: true
+validation:
+  archive_target:
+    start: 2024-01-01
+    end: 2026-03-26
+  warmup_only:
+    start: 2024-01-01
+    end: 2024-04-30
+  outer_walk_forward:
+    train_days: 150
+    calibrate_days: 21
+    test_days: 21
+    purge_hours: 24
+    embargo_hours: 24
+  break_reports:
+  - pre_2023_10_23
+  - post_2023_10_23
+  final_frozen_test:
+    freeze_date: 2025-11-30
+    calibrate_window:
+      start: 2025-12-01
+      end: 2026-01-31
+    untouched_test:
+      start: 2026-03-01
+      end: 2026-03-26
+execution_costs:
+  notionals_usd:
+  - 5000
+  - 25000
+  optimistic:
+    fee_bps_per_side: 2
+    slippage: 0.5_spread
+  base:
+    fee_bps_per_side: 5
+    slippage_formula: max(0.5_spread, 0.5bps, notional_over_top10_depth_times_10bps)
+  stressed:
+    fee_bps_per_side: 8
+    slippage_formula: 2x_base_slippage
+    latency_seconds: 1
+promotion_rules:
+  primary_budget_per_week: 3
+  improve_parent_expectancy_by_at_least_r: 0.05
+  near_equal_expectancy_tolerance_r: 0.02
+  drawdown_improvement_required_percent: 10
+  positive_sign_required_outer_folds_percent: 50
+  no_major_regime_break_reversal: false
+guardrails:
+- use_bybit_only_for_entries_exits_slippage_and_labels
+- persist_raw_native_messages_before_normalization
+- rebuild_orderbook_from_snapshot_plus_deltas_exactly
+- treat_glassnode_and_cryptoquant_as_slow_context_only
+- never_let_aggregated_vendor_metrics_override_bybit_native_gate
+- use_raw_first_touch_labels_when_raw_bybit_events_exist
+- fallback_to_micro_then_bars_only_when_raw_execution_tape_is_missing
+- treat_micro_same_bucket_double_touches_as_stop_first_because_ordering_is_unknown

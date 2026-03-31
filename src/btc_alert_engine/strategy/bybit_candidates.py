@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from btc_alert_engine.features.indicators import atr
-from btc_alert_engine.profiles import StrategyProfile, get_profile
+from btc_alert_engine.profiles import StrategyProfile, VALID_STOP_ANCHOR_MODES, get_profile
 from btc_alert_engine.schemas import (
     CandidateEvent,
     CrowdingFeatureSnapshot,
@@ -95,6 +95,226 @@ def _normalize_sides(sides: Sequence[str] | None) -> list[str]:
     return normalized or ["long"]
 
 
+def _coerce_bool(value: object, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "y", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "n", "off"}:
+            return False
+    return bool(value)
+
+
+def _coerce_positive_float(value: object, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not np.isfinite(parsed) or parsed <= 0:
+        return default
+    return parsed
+
+
+def _coerce_nonnegative_float(value: object, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not np.isfinite(parsed) or parsed < 0:
+        return default
+    return parsed
+
+
+def _coerce_stop_anchor_mode(value: object, default: str) -> str:
+    if value is None:
+        return default
+    mode = str(value).strip().lower()
+    aliases = {
+        "legacy": "trigger_pivot",
+        "trigger": "trigger_pivot",
+        "trigger_pivot": "trigger_pivot",
+        "setup": "setup_anchor",
+        "setup_anchor": "setup_anchor",
+        "setup_anchored": "setup_anchor",
+        "setup_extreme": "setup_anchor",
+        "setup_or_trigger": "wider_of_setup_or_trigger",
+        "hybrid": "wider_of_setup_or_trigger",
+        "wider_of_setup_or_trigger": "wider_of_setup_or_trigger",
+    }
+    mode = aliases.get(mode, mode)
+    if mode not in VALID_STOP_ANCHOR_MODES:
+        return default
+    return mode
+
+
+def _side_override_sections(generator_params: dict[str, object] | None, side: str) -> list[dict[str, object]]:
+    if not isinstance(generator_params, dict):
+        return []
+    sections: list[dict[str, object]] = []
+    side_params = generator_params.get("side_params")
+    if isinstance(side_params, dict):
+        nested = side_params.get(side)
+        if isinstance(nested, dict):
+            sections.append(nested)
+    direct = generator_params.get(side)
+    if isinstance(direct, dict):
+        sections.append(direct)
+    return sections
+
+
+def _resolve_continuation_params(
+    resolved_profile: StrategyProfile,
+    side: str,
+    *,
+    stop_width_multiplier: float,
+    target_r_multiple: float,
+    generator_params: dict[str, object] | None,
+) -> dict[str, object]:
+    common = {
+        key: value
+        for key, value in (generator_params or {}).items()
+        if key not in {"long", "short", "side_params"} and not isinstance(value, dict)
+    }
+    resolved: dict[str, object] = {
+        "stop_width_multiplier": stop_width_multiplier,
+        "target_r_multiple": target_r_multiple,
+        "stop_anchor_mode": resolved_profile.continuation_stop_anchor_mode,
+        "stop_buffer_atr_trigger": resolved_profile.continuation_stop_buffer_atr_trigger,
+        "one_trigger_per_setup": resolved_profile.continuation_one_trigger_per_setup,
+        "min_impulse_atr": 1.0,
+        "min_downside_impulse_atr": 1.0,
+        "pullback_depth_min": 0.20,
+        "pullback_depth_max": 0.60,
+        "bounce_depth_min": 0.20,
+        "bounce_depth_max": 0.60,
+    }
+    for section in [common, *_side_override_sections(generator_params, side)]:
+        if "stop_width_multiplier" in section:
+            resolved["stop_width_multiplier"] = _coerce_positive_float(section.get("stop_width_multiplier"), float(resolved["stop_width_multiplier"]))
+        if "target_r_multiple" in section:
+            resolved["target_r_multiple"] = _coerce_positive_float(section.get("target_r_multiple"), float(resolved["target_r_multiple"]))
+        if "stop_buffer_atr_trigger" in section:
+            resolved["stop_buffer_atr_trigger"] = _coerce_positive_float(section.get("stop_buffer_atr_trigger"), float(resolved["stop_buffer_atr_trigger"]))
+        if "min_impulse_atr" in section:
+            parsed = _coerce_nonnegative_float(section.get("min_impulse_atr"), float(resolved["min_impulse_atr"]))
+            resolved["min_impulse_atr"] = parsed
+            if "min_downside_impulse_atr" not in section:
+                resolved["min_downside_impulse_atr"] = parsed
+        if "min_downside_impulse_atr" in section:
+            resolved["min_downside_impulse_atr"] = _coerce_nonnegative_float(section.get("min_downside_impulse_atr"), float(resolved["min_downside_impulse_atr"]))
+        if "pullback_depth_min" in section:
+            resolved["pullback_depth_min"] = _coerce_nonnegative_float(section.get("pullback_depth_min"), float(resolved["pullback_depth_min"]))
+        if "pullback_depth_max" in section:
+            resolved["pullback_depth_max"] = _coerce_nonnegative_float(section.get("pullback_depth_max"), float(resolved["pullback_depth_max"]))
+        if "bounce_depth_min" in section:
+            resolved["bounce_depth_min"] = _coerce_nonnegative_float(section.get("bounce_depth_min"), float(resolved["bounce_depth_min"]))
+        if "bounce_depth_max" in section:
+            resolved["bounce_depth_max"] = _coerce_nonnegative_float(section.get("bounce_depth_max"), float(resolved["bounce_depth_max"]))
+        if "stop_anchor_mode" in section:
+            resolved["stop_anchor_mode"] = _coerce_stop_anchor_mode(section.get("stop_anchor_mode"), str(resolved["stop_anchor_mode"]))
+        if "one_trigger_per_setup" in section:
+            resolved["one_trigger_per_setup"] = _coerce_bool(section.get("one_trigger_per_setup"), bool(resolved["one_trigger_per_setup"]))
+        if "allow_multiple_triggers_per_setup" in section:
+            allow_multiple = _coerce_bool(section.get("allow_multiple_triggers_per_setup"), not bool(resolved["one_trigger_per_setup"]))
+            resolved["one_trigger_per_setup"] = not allow_multiple
+    if float(resolved["pullback_depth_min"]) > float(resolved["pullback_depth_max"]):
+        resolved["pullback_depth_min"], resolved["pullback_depth_max"] = resolved["pullback_depth_max"], resolved["pullback_depth_min"]
+    if float(resolved["bounce_depth_min"]) > float(resolved["bounce_depth_max"]):
+        resolved["bounce_depth_min"], resolved["bounce_depth_max"] = resolved["bounce_depth_max"], resolved["bounce_depth_min"]
+    return resolved
+
+
+def _resolve_setup_episode_id(ts: pd.Timestamp, row: pd.Series, *, side: str, profile: StrategyProfile) -> int | None:
+    episode_field = "setup_break_episode_id" if side == "long" else "setup_breakdown_episode_id"
+    if episode_field in row and pd.notna(row.get(episode_field)):
+        return int(float(row.get(episode_field)))
+
+    age = _feature_value(
+        row,
+        "setup_break_age" if side == "long" else "setup_breakdown_age",
+        "breakout_age_1h" if side == "long" else "breakdown_age_1h",
+    )
+    if not np.isfinite(age):
+        return None
+    floored_setup_ts = ts.floor(profile.setup_resample_rule)
+    setup_interval_ms = profile.setup_minutes * 60_000
+    return int(floored_setup_ts.timestamp() * 1000) - int(age) * setup_interval_ms
+
+
+def _setup_anchor_value(row: pd.Series, *, side: str) -> float:
+    if side == "long":
+        return _feature_value(row, "setup_breakout_anchor_low")
+    return _feature_value(row, "setup_breakdown_anchor_high")
+
+
+def _continuation_stop_and_tp(
+    row: pd.Series,
+    *,
+    entry: float,
+    side: str,
+    atr_trigger: float,
+    params: dict[str, object],
+) -> tuple[float, float, float] | None:
+    mode = str(params["stop_anchor_mode"])
+    buffer_atr = float(params["stop_buffer_atr_trigger"])
+    width_multiplier = float(params["stop_width_multiplier"])
+    target_multiple = float(params["target_r_multiple"])
+    buffer_amt = buffer_atr * atr_trigger
+
+    if side == "long":
+        trigger_anchor = _numeric_or_nan(row.get("recent_stop_low"))
+        setup_anchor = _setup_anchor_value(row, side=side)
+        if mode == "setup_anchor":
+            base_anchor = setup_anchor
+        elif mode == "wider_of_setup_or_trigger":
+            anchors = [value for value in (setup_anchor, trigger_anchor) if np.isfinite(value)]
+            if not anchors:
+                return None
+            base_anchor = min(anchors)
+        else:
+            base_anchor = trigger_anchor
+        if not np.isfinite(base_anchor):
+            return None
+        if mode == "trigger_pivot":
+            base_stop = float(min(base_anchor - 0.25 * atr_trigger, entry - 0.50 * atr_trigger))
+        else:
+            base_stop = float(base_anchor - buffer_amt)
+        if not np.isfinite(base_stop) or base_stop >= entry:
+            return None
+        risk = (entry - base_stop) * width_multiplier
+        stop = float(entry - risk)
+        tp = float(entry + target_multiple * risk)
+        return stop, tp, risk
+
+    trigger_anchor = _numeric_or_nan(row.get("recent_stop_high"))
+    setup_anchor = _setup_anchor_value(row, side=side)
+    if mode == "setup_anchor":
+        base_anchor = setup_anchor
+    elif mode == "wider_of_setup_or_trigger":
+        anchors = [value for value in (setup_anchor, trigger_anchor) if np.isfinite(value)]
+        if not anchors:
+            return None
+        base_anchor = max(anchors)
+    else:
+        base_anchor = trigger_anchor
+    if not np.isfinite(base_anchor):
+        return None
+    if mode == "trigger_pivot":
+        base_stop = float(max(base_anchor + 0.25 * atr_trigger, entry + 0.50 * atr_trigger))
+    else:
+        base_stop = float(base_anchor + buffer_amt)
+    if not np.isfinite(base_stop) or base_stop <= entry:
+        return None
+    risk = (base_stop - entry) * width_multiplier
+    stop = float(entry + risk)
+    tp = float(entry - target_multiple * risk)
+    return stop, tp, risk
+
+
 def build_continuation_candidates(
     trade_bars: Iterable[PriceBar],
     trend_features: Iterable[TrendFeatureSnapshot],
@@ -112,12 +332,8 @@ def build_continuation_candidates(
     require_macro_veto: bool = False,
     stop_width_multiplier: float = 1.0,
     target_r_multiple: float = 2.0,
-    min_impulse_atr: float = 1.0,
-    pullback_depth_min: float = 0.20,
-    pullback_depth_max: float = 0.60,
-    bounce_depth_min: float | None = None,
-    bounce_depth_max: float | None = None,
     sides: Sequence[str] | None = None,
+    generator_params: dict[str, object] | None = None,
     profile: str | StrategyProfile = "core",
 ) -> list[CandidateEvent]:
     resolved_profile = get_profile(profile)
@@ -126,8 +342,6 @@ def build_continuation_candidates(
     if price.empty:
         return []
     run_sides = _normalize_sides(sides)
-    bounce_depth_min = pullback_depth_min if bounce_depth_min is None else bounce_depth_min
-    bounce_depth_max = pullback_depth_max if bounce_depth_max is None else bounce_depth_max
     trend = _align_feature_frame(trend_features, price.index)
     regime = _align_feature_frame(regime_features, price.index)
     crowding = _align_feature_frame(crowding_features, price.index)
@@ -152,8 +366,10 @@ def build_continuation_candidates(
     frame["recent_stop_high"] = recent_stop_high
 
     candidates: list[CandidateEvent] = []
+    emitted_setup_ids: dict[str, set[int]] = {side: set() for side in run_sides}
     for ts, row in frame.iterrows():
-        if pd.isna(row.get("atr15")):
+        atr_trigger = _numeric_or_nan(row.get("atr15"))
+        if not np.isfinite(atr_trigger):
             continue
         ema50_gap = _feature_value(row, "ema_fast_regime_gap", "ema50_4h_gap")
         ema50_slope = _feature_value(row, "ema_fast_regime_slope", "ema50_4h_slope")
@@ -162,8 +378,17 @@ def build_continuation_candidates(
         range_score = _numeric_or_nan(row.get("range_score"))
         stress_score = _numeric_or_nan(row.get("stress_score"))
         close_px = _numeric_or_nan(row.get("close"))
+        if not np.isfinite(close_px):
+            continue
 
         for side in run_sides:
+            side_params = _resolve_continuation_params(
+                resolved_profile,
+                side,
+                stop_width_multiplier=stop_width_multiplier,
+                target_r_multiple=target_r_multiple,
+                generator_params=generator_params,
+            )
             veto_reasons: list[str] = []
             veto_col = "veto_long" if side == "long" else "veto_short"
             if require_crowding_veto and bool(row.get(veto_col, False)):
@@ -173,15 +398,15 @@ def build_continuation_candidates(
                 veto_reasons.append(f"macro_veto_{event_type}")
 
             if side == "long":
-                if pd.isna(row.get("recent_pivot_high")) or pd.isna(row.get("recent_stop_low")):
+                if pd.isna(row.get("recent_pivot_high")):
                     continue
                 conds = {
                     "trend_gap_positive": ema50_gap > 0,
                     "ema50_slope_positive": ema50_slope > 0,
                     "ema200_slope_positive": ema200_slope > 0,
                     "breakout_recent": 0 <= _feature_value(row, "setup_break_age", "breakout_age_1h") <= resolved_profile.setup_active_bars,
-                    "impulse_valid": _feature_value(row, "setup_impulse_atr", "impulse_atr_1h") >= min_impulse_atr,
-                    "pullback_depth_valid": pullback_depth_min <= _feature_value(row, "setup_pullback_depth_frac", "pullback_depth_frac") <= pullback_depth_max,
+                    "impulse_valid": _feature_value(row, "setup_impulse_atr", "impulse_atr_1h") >= float(side_params["min_impulse_atr"]),
+                    "pullback_depth_valid": float(side_params["pullback_depth_min"]) <= _feature_value(row, "setup_pullback_depth_frac", "pullback_depth_frac") <= float(side_params["pullback_depth_max"]),
                     "above_breakout_level": _feature_value(row, "dist_to_setup_breakout_level", "dist_to_breakout_level") > -0.005,
                     "above_regime_ema": _feature_value(row, "dist_to_regime_ema", "dist_to_ema50_4h") > 0,
                     "trigger_break": close_px > _numeric_or_nan(row.get("recent_pivot_high")),
@@ -195,23 +420,26 @@ def build_continuation_candidates(
                     conds["macro_window_clear"] = not bool(row.get("veto_active", False))
                 if veto_reasons or not all(conds.values()):
                     continue
-                entry = float(row["close"])
-                base_stop = float(min(row["recent_stop_low"] - 0.25 * row["atr15"], entry - 0.50 * row["atr15"]))
-                if not np.isfinite(base_stop) or base_stop >= entry:
+                setup_episode_id = _resolve_setup_episode_id(ts, row, side=side, profile=resolved_profile)
+                if bool(side_params["one_trigger_per_setup"]) and setup_episode_id is not None:
+                    if setup_episode_id in emitted_setup_ids[side]:
+                        continue
+                    conds["first_trigger_for_setup"] = True
+                entry = float(close_px)
+                stop_result = _continuation_stop_and_tp(row, entry=entry, side=side, atr_trigger=atr_trigger, params=side_params)
+                if stop_result is None:
                     continue
-                risk = (entry - base_stop) * stop_width_multiplier
-                stop = float(entry - risk)
-                tp = entry + target_r_multiple * risk
+                stop, tp, risk = stop_result
             else:
-                if pd.isna(row.get("recent_pivot_low")) or pd.isna(row.get("recent_stop_high")):
+                if pd.isna(row.get("recent_pivot_low")):
                     continue
                 conds = {
                     "trend_gap_negative": ema50_gap < 0,
                     "ema50_slope_negative": ema50_slope < 0,
                     "ema200_slope_negative": ema200_slope < 0,
                     "breakdown_recent": 0 <= _feature_value(row, "setup_breakdown_age", "breakdown_age_1h") <= resolved_profile.setup_active_bars,
-                    "downside_impulse_valid": _feature_value(row, "setup_downside_impulse_atr", "downside_impulse_atr_1h") >= min_impulse_atr,
-                    "bounce_depth_valid": bounce_depth_min <= _feature_value(row, "setup_bounce_depth_frac", "bounce_depth_frac") <= bounce_depth_max,
+                    "downside_impulse_valid": _feature_value(row, "setup_downside_impulse_atr", "downside_impulse_atr_1h") >= float(side_params["min_downside_impulse_atr"]),
+                    "bounce_depth_valid": float(side_params["bounce_depth_min"]) <= _feature_value(row, "setup_bounce_depth_frac", "bounce_depth_frac") <= float(side_params["bounce_depth_max"]),
                     "below_breakdown_level": _feature_value(row, "dist_to_setup_breakdown_level", "dist_to_breakdown_level") > -0.005,
                     "below_regime_ema": _feature_value(row, "dist_below_regime_ema", "dist_below_ema50_4h") > 0,
                     "trigger_break": close_px < _numeric_or_nan(row.get("recent_pivot_low")),
@@ -225,16 +453,21 @@ def build_continuation_candidates(
                     conds["macro_window_clear"] = not bool(row.get("veto_active", False))
                 if veto_reasons or not all(conds.values()):
                     continue
-                entry = float(row["close"])
-                base_stop = float(max(row["recent_stop_high"] + 0.25 * row["atr15"], entry + 0.50 * row["atr15"]))
-                if not np.isfinite(base_stop) or base_stop <= entry:
+                setup_episode_id = _resolve_setup_episode_id(ts, row, side=side, profile=resolved_profile)
+                if bool(side_params["one_trigger_per_setup"]) and setup_episode_id is not None:
+                    if setup_episode_id in emitted_setup_ids[side]:
+                        continue
+                    conds["first_trigger_for_setup"] = True
+                entry = float(close_px)
+                stop_result = _continuation_stop_and_tp(row, entry=entry, side=side, atr_trigger=atr_trigger, params=side_params)
+                if stop_result is None:
                     continue
-                risk = (base_stop - entry) * stop_width_multiplier
-                stop = float(entry + risk)
-                tp = entry - target_r_multiple * risk
+                stop, tp, risk = stop_result
 
             if not np.isfinite(stop) or risk <= 0:
                 continue
+            if bool(side_params["one_trigger_per_setup"]) and setup_episode_id is not None:
+                emitted_setup_ids[side].add(setup_episode_id)
             feature_payload = {
                 "atr15": _optional_float(row.get("atr15")),
                 "signal_risk": _optional_float(risk),
@@ -251,7 +484,7 @@ def build_continuation_candidates(
                     entry=entry,
                     stop=float(stop),
                     tp=float(tp),
-                    target_r_multiple=target_r_multiple,
+                    target_r_multiple=float(side_params["target_r_multiple"]),
                     timeout_bars=timeout_bars,
                     rule_reasons=[name for name, ok in conds.items() if ok],
                     veto_reasons=veto_reasons,

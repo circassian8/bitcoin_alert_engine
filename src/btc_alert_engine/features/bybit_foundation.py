@@ -116,41 +116,54 @@ def _trend_feature_frame(trigger_bars: Iterable[PriceBar], *, profile: StrategyP
     pullback_depth_frac: list[float] = []
     pullback_bars: list[float] = []
     breakout_level_vals: list[float] = []
+    break_episode_ids: list[float] = []
+    breakout_anchor_lows: list[float] = []
 
     breakdown_age: list[float] = []
     downside_impulse_atr: list[float] = []
     bounce_depth_frac: list[float] = []
     bounce_bars: list[float] = []
     breakdown_level_vals: list[float] = []
+    breakdown_episode_ids: list[float] = []
+    breakdown_anchor_highs: list[float] = []
 
     active_breakout_idx: int | None = None
+    active_breakout_ts_ms: int | None = None
     breakout_level = float("nan")
     long_impulse = float("nan")
     high_since_breakout = float("nan")
+    low_since_breakout = float("nan")
     bars_since_high = float("nan")
 
     active_breakdown_idx: int | None = None
+    active_breakdown_ts_ms: int | None = None
     breakdown_level = float("nan")
     short_impulse = float("nan")
     low_since_breakdown = float("nan")
+    high_since_breakdown = float("nan")
     bars_since_low = float("nan")
 
-    for i, (_, row) in enumerate(bars_setup.iterrows()):
+    for i, (bar_ts, row) in enumerate(bars_setup.iterrows()):
         current_atr = float(atr_setup.iloc[i]) if not math.isnan(float(atr_setup.iloc[i])) else float("nan")
+        bar_ts_ms = int(bar_ts.timestamp() * 1000)
 
         if bool(breakout_flag.iloc[i]) and not math.isnan(float(prior_setup_high.iloc[i])):
             active_breakout_idx = i
+            active_breakout_ts_ms = bar_ts_ms
             breakout_level = float(prior_setup_high.iloc[i])
             long_impulse = ((float(row["close"]) - breakout_level) / current_atr) if current_atr and not math.isnan(current_atr) else float("nan")
             high_since_breakout = float(row["high"])
+            low_since_breakout = float(row["low"])
             bars_since_high = 0.0
         elif active_breakout_idx is not None:
             age = i - active_breakout_idx
             if age > profile.setup_active_bars:
                 active_breakout_idx = None
+                active_breakout_ts_ms = None
                 breakout_level = float("nan")
                 long_impulse = float("nan")
                 high_since_breakout = float("nan")
+                low_since_breakout = float("nan")
                 bars_since_high = float("nan")
             else:
                 if float(row["high"]) >= high_since_breakout:
@@ -158,20 +171,25 @@ def _trend_feature_frame(trigger_bars: Iterable[PriceBar], *, profile: StrategyP
                     bars_since_high = 0.0
                 else:
                     bars_since_high = 0.0 if math.isnan(bars_since_high) else bars_since_high + 1.0
+                low_since_breakout = min(low_since_breakout, float(row["low"])) if not math.isnan(low_since_breakout) else float(row["low"])
 
         if bool(breakdown_flag.iloc[i]) and not math.isnan(float(prior_setup_low.iloc[i])):
             active_breakdown_idx = i
+            active_breakdown_ts_ms = bar_ts_ms
             breakdown_level = float(prior_setup_low.iloc[i])
             short_impulse = ((breakdown_level - float(row["close"])) / current_atr) if current_atr and not math.isnan(current_atr) else float("nan")
             low_since_breakdown = float(row["low"])
+            high_since_breakdown = float(row["high"])
             bars_since_low = 0.0
         elif active_breakdown_idx is not None:
             age = i - active_breakdown_idx
             if age > profile.setup_active_bars:
                 active_breakdown_idx = None
+                active_breakdown_ts_ms = None
                 breakdown_level = float("nan")
                 short_impulse = float("nan")
                 low_since_breakdown = float("nan")
+                high_since_breakdown = float("nan")
                 bars_since_low = float("nan")
             else:
                 if float(row["low"]) <= low_since_breakdown:
@@ -179,6 +197,7 @@ def _trend_feature_frame(trigger_bars: Iterable[PriceBar], *, profile: StrategyP
                     bars_since_low = 0.0
                 else:
                     bars_since_low = 0.0 if math.isnan(bars_since_low) else bars_since_low + 1.0
+                high_since_breakdown = max(high_since_breakdown, float(row["high"])) if not math.isnan(high_since_breakdown) else float(row["high"])
 
         if active_breakout_idx is None:
             breakout_age.append(float("nan"))
@@ -186,6 +205,8 @@ def _trend_feature_frame(trigger_bars: Iterable[PriceBar], *, profile: StrategyP
             pullback_depth_frac.append(float("nan"))
             pullback_bars.append(float("nan"))
             breakout_level_vals.append(float("nan"))
+            break_episode_ids.append(float("nan"))
+            breakout_anchor_lows.append(float("nan"))
         else:
             age = float(i - active_breakout_idx)
             breakout_age.append(age)
@@ -195,6 +216,8 @@ def _trend_feature_frame(trigger_bars: Iterable[PriceBar], *, profile: StrategyP
             pullback_depth = max(high_since_breakout - float(row["close"]), 0.0) / denom
             pullback_depth_frac.append(pullback_depth)
             pullback_bars.append(bars_since_high)
+            break_episode_ids.append(float(active_breakout_ts_ms) if active_breakout_ts_ms is not None else float("nan"))
+            breakout_anchor_lows.append(low_since_breakout)
 
         if active_breakdown_idx is None:
             breakdown_age.append(float("nan"))
@@ -202,6 +225,8 @@ def _trend_feature_frame(trigger_bars: Iterable[PriceBar], *, profile: StrategyP
             bounce_depth_frac.append(float("nan"))
             bounce_bars.append(float("nan"))
             breakdown_level_vals.append(float("nan"))
+            breakdown_episode_ids.append(float("nan"))
+            breakdown_anchor_highs.append(float("nan"))
         else:
             age = float(i - active_breakdown_idx)
             breakdown_age.append(age)
@@ -211,16 +236,22 @@ def _trend_feature_frame(trigger_bars: Iterable[PriceBar], *, profile: StrategyP
             bounce_depth = max(float(row["close"]) - low_since_breakdown, 0.0) / denom
             bounce_depth_frac.append(bounce_depth)
             bounce_bars.append(bars_since_low)
+            breakdown_episode_ids.append(float(active_breakdown_ts_ms) if active_breakdown_ts_ms is not None else float("nan"))
+            breakdown_anchor_highs.append(high_since_breakdown)
 
     setup["setup_break_age"] = breakout_age
     setup["setup_impulse_atr"] = impulse_atr
     setup["setup_pullback_depth_frac"] = pullback_depth_frac
     setup["setup_pullback_bars"] = pullback_bars
+    setup["setup_break_episode_id"] = break_episode_ids
+    setup["setup_breakout_anchor_low"] = breakout_anchor_lows
     setup["setup_breakout_level"] = breakout_level_vals
     setup["setup_breakdown_age"] = breakdown_age
     setup["setup_downside_impulse_atr"] = downside_impulse_atr
     setup["setup_bounce_depth_frac"] = bounce_depth_frac
     setup["setup_bounce_bars"] = bounce_bars
+    setup["setup_breakdown_episode_id"] = breakdown_episode_ids
+    setup["setup_breakdown_anchor_high"] = breakdown_anchor_highs
     setup["setup_breakdown_level"] = breakdown_level_vals
 
     trend = pd.DataFrame(index=trigger_df.index)
@@ -272,12 +303,16 @@ def _trend_feature_frame(trigger_bars: Iterable[PriceBar], *, profile: StrategyP
         "setup_impulse_atr",
         "setup_pullback_depth_frac",
         "setup_pullback_bars",
+        "setup_break_episode_id",
+        "setup_breakout_anchor_low",
         "dist_to_setup_breakout_level",
         "dist_to_regime_ema",
         "setup_breakdown_age",
         "setup_downside_impulse_atr",
         "setup_bounce_depth_frac",
         "setup_bounce_bars",
+        "setup_breakdown_episode_id",
+        "setup_breakdown_anchor_high",
         "dist_to_setup_breakdown_level",
         "dist_below_regime_ema",
     ]

@@ -1,0 +1,225 @@
+{
+  "static_checks": [
+    {
+      "level": "warning",
+      "code": "execution_tape_empty",
+      "message": "Raw execution tape exists but contains 0 rows; entry and path simulation will fall back to micro buckets or bars."
+    },
+    {
+      "level": "warning",
+      "code": "bar_only_entry_fallback",
+      "message": "Experiment `S0_native_continuation` labeled all entries from bar_open; quote-aware entry simulation is unavailable for this dataset."
+    },
+    {
+      "level": "warning",
+      "code": "bar_only_path_fallback",
+      "message": "Experiment `S0_native_continuation` labeled all paths from trade_bars; intrabar barrier fidelity is degraded."
+    },
+    {
+      "level": "warning",
+      "code": "bar_only_entry_fallback",
+      "message": "Experiment `S1_native_plus_regime` labeled all entries from bar_open; quote-aware entry simulation is unavailable for this dataset."
+    },
+    {
+      "level": "warning",
+      "code": "bar_only_path_fallback",
+      "message": "Experiment `S1_native_plus_regime` labeled all paths from trade_bars; intrabar barrier fidelity is degraded."
+    },
+    {
+      "level": "warning",
+      "code": "bar_only_entry_fallback",
+      "message": "Experiment `S2_plus_crowding_feature` labeled all entries from bar_open; quote-aware entry simulation is unavailable for this dataset."
+    },
+    {
+      "level": "warning",
+      "code": "bar_only_path_fallback",
+      "message": "Experiment `S2_plus_crowding_feature` labeled all paths from trade_bars; intrabar barrier fidelity is degraded."
+    },
+    {
+      "level": "warning",
+      "code": "bar_only_entry_fallback",
+      "message": "Experiment `S3_plus_crowding_veto` labeled all entries from bar_open; quote-aware entry simulation is unavailable for this dataset."
+    },
+    {
+      "level": "warning",
+      "code": "bar_only_path_fallback",
+      "message": "Experiment `S3_plus_crowding_veto` labeled all paths from trade_bars; intrabar barrier fidelity is degraded."
+    }
+  ],
+  "block_statuses": [
+    {
+      "block": "trend_bybit",
+      "exists": true,
+      "rows": 78124,
+      "monotonic_ts": true,
+      "unique_ts": true,
+      "parse_errors": 0
+    },
+    {
+      "block": "regime_bybit",
+      "exists": true,
+      "rows": 78124,
+      "monotonic_ts": true,
+      "unique_ts": true,
+      "parse_errors": 0
+    },
+    {
+      "block": "crowding_bybit_feature",
+      "exists": true,
+      "rows": 78241,
+      "monotonic_ts": true,
+      "unique_ts": true,
+      "parse_errors": 0
+    },
+    {
+      "block": "crowding_bybit_veto",
+      "exists": true,
+      "rows": 78241,
+      "monotonic_ts": true,
+      "unique_ts": true,
+      "parse_errors": 0
+    },
+    {
+      "block": "micro_bybit_score",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0
+    },
+    {
+      "block": "micro_bybit_gate",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0
+    },
+    {
+      "block": "options_deribit",
+      "exists": true,
+      "rows": 78124,
+      "monotonic_ts": true,
+      "unique_ts": true,
+      "parse_errors": 0
+    },
+    {
+      "block": "options_glassnode",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0
+    },
+    {
+      "block": "onchain_glassnode",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0
+    },
+    {
+      "block": "onchain_cryptoquant",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0
+    },
+    {
+      "block": "aggregate_derivs_coinglass",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0
+    },
+    {
+      "block": "macro_veto",
+      "exists": true,
+      "rows": 78124,
+      "monotonic_ts": true,
+      "unique_ts": true,
+      "parse_errors": 0
+    }
+  ],
+  "execution_tape_status": {
+    "exists": true,
+    "rows": 0,
+    "gap_count": 0,
+    "out_of_order_count": 0,
+    "state_error_count": 0
+  },
+  "experiment_statuses": [
+    {
+      "experiment_id": "S0_native_continuation",
+      "blocks": [
+        "trend_bybit"
+      ],
+      "skip_reason": null,
+      "rows": 167,
+      "candidate_count": 167,
+      "label_count": 167,
+      "entry_source_counts": {
+        "bar_open": 167
+      },
+      "path_source_counts": {
+        "trade_bars": 167
+      }
+    },
+    {
+      "experiment_id": "S1_native_plus_regime",
+      "blocks": [
+        "trend_bybit",
+        "regime_bybit"
+      ],
+      "skip_reason": null,
+      "rows": 166,
+      "candidate_count": 166,
+      "label_count": 166,
+      "entry_source_counts": {
+        "bar_open": 166
+      },
+      "path_source_counts": {
+        "trade_bars": 166
+      }
+    },
+    {
+      "experiment_id": "S2_plus_crowding_feature",
+      "blocks": [
+        "trend_bybit",
+        "regime_bybit",
+        "crowding_bybit_feature"
+      ],
+      "skip_reason": null,
+      "rows": 166,
+      "candidate_count": 166,
+      "label_count": 166,
+      "entry_source_counts": {
+        "bar_open": 166
+      },
+      "path_source_counts": {
+        "trade_bars": 166
+      }
+    },
+    {
+      "experiment_id": "S3_plus_crowding_veto",
+      "blocks": [
+        "trend_bybit",
+        "regime_bybit",
+        "crowding_bybit_veto"
+      ],
+      "skip_reason": null,
+      "rows": 159,
+      "candidate_count": 159,
+      "label_count": 159,
+      "entry_source_counts": {
+        "bar_open": 159
+      },
+      "path_source_counts": {
+        "trade_bars": 159
+      }
+    }
+  ]
+}

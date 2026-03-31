@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 import yaml
 
-from btc_alert_engine.research.experiments import ExperimentDataset, build_experiment_event_frame
+from btc_alert_engine.research.experiments import ExperimentDataset, _to_label_frame, build_experiment_event_frame
 from btc_alert_engine.research.walkforward import (
     _apply_portfolio_policy,
     _prune_feature_columns,
@@ -120,6 +120,40 @@ def test_evaluate_predictions_reports_event_and_portfolio_metrics() -> None:
     assert result.event_max_concurrent_positions == 2
     assert result.event_expectancy_r_per_alert == 1.0
     assert result.expectancy_r_per_alert == 2.0
+
+
+def test_to_label_frame_deducts_round_trip_fees_from_realized_r() -> None:
+    label = CandidateLabel(
+        candidate_id="short_tp",
+        ts=int(pd.Timestamp("2026-02-01T00:00:00Z").timestamp() * 1000),
+        module="continuation_v1_fast",
+        symbol="BTCUSDT",
+        side="short",
+        signal_entry=100.0,
+        signal_tp=98.75,
+        entry_ts=int(pd.Timestamp("2026-02-01T00:00:00Z").timestamp() * 1000),
+        executed_entry=100.0,
+        stop=101.0,
+        executed_tp=98.75,
+        exit_ts=int(pd.Timestamp("2026-02-01T00:05:00Z").timestamp() * 1000),
+        executed_exit=98.75,
+        target_r_multiple=1.25,
+        timeout_bars=288,
+        tp_before_sl_within_horizon=True,
+        tp1_before_sl_within_12h=True,
+        mfe_r_24h=1.25,
+        mae_r_24h=0.0,
+        net_r_24h_timeout=1.25,
+        minutes_to_tp_or_sl=5,
+        outcome="tp",
+    )
+
+    frame = _to_label_frame([label], fee_bps_per_side=5.0)
+
+    expected_fee_r = ((100.0 + 98.75) * 0.0005) / 1.0
+    assert frame.loc[0, "gross_realized_r"] == pytest.approx(1.25)
+    assert frame.loc[0, "fee_r"] == pytest.approx(expected_fee_r)
+    assert frame.loc[0, "realized_r"] == pytest.approx(1.25 - expected_fee_r)
 
 
 def test_apply_portfolio_policy_highest_probability_keeps_later_nonoverlapping_trades() -> None:

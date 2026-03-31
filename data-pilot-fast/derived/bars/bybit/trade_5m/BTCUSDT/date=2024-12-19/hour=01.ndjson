@@ -1,0 +1,12 @@
+{"ts": 1734570000000, "symbol": "BTCUSDT", "interval": "5", "open": 100710.7, "high": 100777.0, "low": 100670.6, "close": 100777.0, "volume": 191.147, "turnover": 19252231.7341, "source_topic": "kline_5"}
+{"ts": 1734570300000, "symbol": "BTCUSDT", "interval": "5", "open": 100777.0, "high": 100849.9, "low": 100514.7, "close": 100515.5, "volume": 251.346, "turnover": 25299760.5675, "source_topic": "kline_5"}
+{"ts": 1734570600000, "symbol": "BTCUSDT", "interval": "5", "open": 100515.5, "high": 100532.2, "low": 100328.4, "close": 100384.0, "volume": 342.309, "turnover": 34371867.5625, "source_topic": "kline_5"}
+{"ts": 1734570900000, "symbol": "BTCUSDT", "interval": "5", "open": 100384.0, "high": 100594.9, "low": 100319.8, "close": 100517.7, "volume": 232.213, "turnover": 23323769.152, "source_topic": "kline_5"}
+{"ts": 1734571200000, "symbol": "BTCUSDT", "interval": "5", "open": 100517.7, "high": 100700.0, "low": 100510.0, "close": 100691.5, "volume": 290.816, "turnover": 29256706.3547, "source_topic": "kline_5"}
+{"ts": 1734571500000, "symbol": "BTCUSDT", "interval": "5", "open": 100691.5, "high": 100783.9, "low": 100602.7, "close": 100771.2, "volume": 233.267, "turnover": 23493494.7288, "source_topic": "kline_5"}
+{"ts": 1734571800000, "symbol": "BTCUSDT", "interval": "5", "open": 100771.2, "high": 100871.6, "low": 100503.1, "close": 100503.1, "volume": 405.752, "turnover": 40871313.7798, "source_topic": "kline_5"}
+{"ts": 1734572100000, "symbol": "BTCUSDT", "interval": "5", "open": 100503.1, "high": 100555.3, "low": 100324.0, "close": 100324.1, "volume": 378.173, "turnover": 37973535.4801, "source_topic": "kline_5"}
+{"ts": 1734572400000, "symbol": "BTCUSDT", "interval": "5", "open": 100324.1, "high": 100474.0, "low": 100290.1, "close": 100354.9, "volume": 277.659, "turnover": 27870205.946, "source_topic": "kline_5"}
+{"ts": 1734572700000, "symbol": "BTCUSDT", "interval": "5", "open": 100354.9, "high": 100361.0, "low": 100092.9, "close": 100160.2, "volume": 614.143, "turnover": 61531334.3965, "source_topic": "kline_5"}
+{"ts": 1734573000000, "symbol": "BTCUSDT", "interval": "5", "open": 100160.2, "high": 100340.7, "low": 100091.5, "close": 100205.8, "volume": 451.064, "turnover": 45221783.2312, "source_topic": "kline_5"}
+{"ts": 1734573300000, "symbol": "BTCUSDT", "interval": "5", "open": 100205.8, "high": 100245.4, "low": 99900.0, "close": 99987.9, "volume": 706.821, "turnover": 70716569.4411, "source_topic": "kline_5"}

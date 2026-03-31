@@ -175,12 +175,16 @@ class TrendFeatureSnapshot(BaseModel):
     setup_impulse_atr: float | None = None
     setup_pullback_depth_frac: float | None = None
     setup_pullback_bars: float | None = None
+    setup_break_episode_id: int | None = None
+    setup_breakout_anchor_low: float | None = None
     dist_to_setup_breakout_level: float | None = None
     dist_to_regime_ema: float | None = None
     setup_breakdown_age: float | None = None
     setup_downside_impulse_atr: float | None = None
     setup_bounce_depth_frac: float | None = None
     setup_bounce_bars: float | None = None
+    setup_breakdown_episode_id: int | None = None
+    setup_breakdown_anchor_high: float | None = None
     dist_to_setup_breakdown_level: float | None = None
     dist_below_regime_ema: float | None = None
     ret_15m_1: float | None = None

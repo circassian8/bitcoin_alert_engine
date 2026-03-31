@@ -1,0 +1,460 @@
+{
+  "current_provenance": {
+    "created_at_utc": "2026-03-30T14:35:44.093891+00:00",
+    "package_version": "0.7.0",
+    "project_root": "/Users/nasrenkaraf/Documents/Projects/bitcoin_alert_engine",
+    "git_commit": "0b586005d5bb5ef72296bfa3dc038aef96af64b8",
+    "source_tree_sha256": "69ca4ac8dd250485464f61c0185df4451dff132f1d08547afc7963062ce6f72d",
+    "data_dir": "/Users/nasrenkaraf/Documents/Projects/bitcoin_alert_engine/data-pilot-fast",
+    "data_state_sha256": "642cdf903f0b4e6d41d176294b0188272e707838644f86b9900506fe037c4a06",
+    "registry_path": "/Users/nasrenkaraf/Documents/Projects/bitcoin_alert_engine/research_registry_broad_test_fast_revised_first_signal.yaml",
+    "registry_sha256": "15d1ed2cb4720f72e98c8976f025a799cc9b703d98369b9d63c83dc4fd350fe2",
+    "feature_contracts_path": "/Users/nasrenkaraf/Documents/Projects/bitcoin_alert_engine/feature_contracts.yaml",
+    "feature_contracts_sha256": "49c99e675a975eb3cbc34f065aa87c24a147fa617d501e9345b038934fe4c729"
+  },
+  "static_checks": [
+    {
+      "level": "warning",
+      "code": "execution_tape_empty",
+      "message": "Raw execution tape exists but contains 0 rows; entry and path simulation will fall back to micro buckets or bars."
+    },
+    {
+      "level": "warning",
+      "code": "bar_only_entry_fallback",
+      "message": "Experiment `S2_current_fast_crowding_feature` labeled all entries from bar_open; quote-aware entry simulation is unavailable for this dataset."
+    },
+    {
+      "level": "warning",
+      "code": "bar_only_path_fallback",
+      "message": "Experiment `S2_current_fast_crowding_feature` labeled all paths from trade_bars; intrabar barrier fidelity is degraded."
+    },
+    {
+      "level": "warning",
+      "code": "bar_only_entry_fallback",
+      "message": "Experiment `F1_setup_anchor_smallbuf_tp125` labeled all entries from bar_open; quote-aware entry simulation is unavailable for this dataset."
+    },
+    {
+      "level": "warning",
+      "code": "bar_only_path_fallback",
+      "message": "Experiment `F1_setup_anchor_smallbuf_tp125` labeled all paths from trade_bars; intrabar barrier fidelity is degraded."
+    },
+    {
+      "level": "warning",
+      "code": "bar_only_entry_fallback",
+      "message": "Experiment `F2_setup_anchor_modbuf_tp150` labeled all entries from bar_open; quote-aware entry simulation is unavailable for this dataset."
+    },
+    {
+      "level": "warning",
+      "code": "bar_only_path_fallback",
+      "message": "Experiment `F2_setup_anchor_modbuf_tp150` labeled all paths from trade_bars; intrabar barrier fidelity is degraded."
+    },
+    {
+      "level": "warning",
+      "code": "bar_only_entry_fallback",
+      "message": "Experiment `F3_setup_anchor_modbuf_tp125` labeled all entries from bar_open; quote-aware entry simulation is unavailable for this dataset."
+    },
+    {
+      "level": "warning",
+      "code": "bar_only_path_fallback",
+      "message": "Experiment `F3_setup_anchor_modbuf_tp125` labeled all paths from trade_bars; intrabar barrier fidelity is degraded."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_data_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_broad_test_fast_revised_first_signal/manifest.json` does not match the current data state hash."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_registry_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_broad_test_fast_revised_highest_probability/manifest.json` was generated from a different registry configuration."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_data_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_broad_test_fast_revised_highest_probability/manifest.json` does not match the current data state hash."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_registry_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_broad_test_fast_symmetric/manifest.json` was generated from a different registry configuration."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_code_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_broad_test_fast_symmetric/manifest.json` does not match the current source tree hash."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_data_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_broad_test_fast_symmetric/manifest.json` does not match the current data state hash."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_contracts_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_broad_test_fast_symmetric/manifest.json` does not match the current feature contracts hash."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_registry_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_broad_test_fast_symmetric_pre_warning_fix/manifest.json` was generated from a different registry configuration."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_code_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_broad_test_fast_symmetric_pre_warning_fix/manifest.json` does not match the current source tree hash."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_data_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_broad_test_fast_symmetric_pre_warning_fix/manifest.json` does not match the current data state hash."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_contracts_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_broad_test_fast_symmetric_pre_warning_fix/manifest.json` does not match the current feature contracts hash."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_registry_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_smoke_fast_revised_first_signal/manifest.json` was generated from a different registry configuration."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_data_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_smoke_fast_revised_first_signal/manifest.json` does not match the current data state hash."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_registry_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_smoke_fast_revised_highest_probability/manifest.json` was generated from a different registry configuration."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_data_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_smoke_fast_revised_highest_probability/manifest.json` does not match the current data state hash."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_registry_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_smoke_fast_symmetric/manifest.json` was generated from a different registry configuration."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_code_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_smoke_fast_symmetric/manifest.json` does not match the current source tree hash."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_data_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_smoke_fast_symmetric/manifest.json` does not match the current data state hash."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_contracts_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_smoke_fast_symmetric/manifest.json` does not match the current feature contracts hash."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_registry_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_smoke_fast_symmetric_pre_warning_fix/manifest.json` was generated from a different registry configuration."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_code_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_smoke_fast_symmetric_pre_warning_fix/manifest.json` does not match the current source tree hash."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_data_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_smoke_fast_symmetric_pre_warning_fix/manifest.json` does not match the current data state hash."
+    },
+    {
+      "level": "warning",
+      "code": "report_manifest_contracts_mismatch",
+      "message": "Report manifest `reports/data-pilot-fast/walkforward_smoke_fast_symmetric_pre_warning_fix/manifest.json` does not match the current feature contracts hash."
+    }
+  ],
+  "block_statuses": [
+    {
+      "block": "trend_bybit",
+      "exists": true,
+      "rows": 156248,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0,
+      "missing_expected_fields": []
+    },
+    {
+      "block": "trend_bybit_fast",
+      "exists": true,
+      "rows": 703347,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0,
+      "missing_expected_fields": []
+    },
+    {
+      "block": "regime_bybit",
+      "exists": true,
+      "rows": 156248,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0,
+      "missing_expected_fields": []
+    },
+    {
+      "block": "regime_bybit_fast",
+      "exists": true,
+      "rows": 703347,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0,
+      "missing_expected_fields": []
+    },
+    {
+      "block": "crowding_bybit_feature",
+      "exists": true,
+      "rows": 234723,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0,
+      "missing_expected_fields": []
+    },
+    {
+      "block": "crowding_bybit_veto",
+      "exists": true,
+      "rows": 234723,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0,
+      "missing_expected_fields": []
+    },
+    {
+      "block": "micro_bybit_score",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0,
+      "missing_expected_fields": []
+    },
+    {
+      "block": "micro_bybit_gate",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0,
+      "missing_expected_fields": []
+    },
+    {
+      "block": "options_deribit",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0,
+      "missing_expected_fields": []
+    },
+    {
+      "block": "options_glassnode",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0,
+      "missing_expected_fields": []
+    },
+    {
+      "block": "onchain_glassnode",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0,
+      "missing_expected_fields": []
+    },
+    {
+      "block": "onchain_cryptoquant",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0,
+      "missing_expected_fields": []
+    },
+    {
+      "block": "aggregate_derivs_coinglass",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0,
+      "missing_expected_fields": []
+    },
+    {
+      "block": "macro_veto",
+      "exists": false,
+      "rows": 0,
+      "monotonic_ts": false,
+      "unique_ts": false,
+      "parse_errors": 0,
+      "missing_expected_fields": []
+    }
+  ],
+  "execution_tape_status": {
+    "exists": true,
+    "rows": 0,
+    "gap_count": 0,
+    "out_of_order_count": 0,
+    "state_error_count": 0
+  },
+  "experiment_statuses": [
+    {
+      "experiment_id": "S2_current_fast_crowding_feature",
+      "blocks": [
+        "trend_bybit_fast",
+        "regime_bybit_fast",
+        "crowding_bybit_feature"
+      ],
+      "skip_reason": null,
+      "rows": 556,
+      "candidate_count": 556,
+      "label_count": 556,
+      "entry_source_counts": {
+        "bar_open": 556
+      },
+      "path_source_counts": {
+        "trade_bars": 556
+      }
+    },
+    {
+      "experiment_id": "F1_setup_anchor_smallbuf_tp125",
+      "blocks": [
+        "trend_bybit_fast",
+        "regime_bybit_fast",
+        "crowding_bybit_feature"
+      ],
+      "skip_reason": null,
+      "rows": 556,
+      "candidate_count": 556,
+      "label_count": 556,
+      "entry_source_counts": {
+        "bar_open": 556
+      },
+      "path_source_counts": {
+        "trade_bars": 556
+      }
+    },
+    {
+      "experiment_id": "F2_setup_anchor_modbuf_tp150",
+      "blocks": [
+        "trend_bybit_fast",
+        "regime_bybit_fast",
+        "crowding_bybit_feature"
+      ],
+      "skip_reason": null,
+      "rows": 556,
+      "candidate_count": 556,
+      "label_count": 556,
+      "entry_source_counts": {
+        "bar_open": 556
+      },
+      "path_source_counts": {
+        "trade_bars": 556
+      }
+    },
+    {
+      "experiment_id": "F3_setup_anchor_modbuf_tp125",
+      "blocks": [
+        "trend_bybit_fast",
+        "regime_bybit_fast",
+        "crowding_bybit_feature"
+      ],
+      "skip_reason": null,
+      "rows": 556,
+      "candidate_count": 556,
+      "label_count": 556,
+      "entry_source_counts": {
+        "bar_open": 556
+      },
+      "path_source_counts": {
+        "trade_bars": 556
+      }
+    }
+  ],
+  "report_manifest_statuses": [
+    {
+      "path": "reports/data-pilot-fast/walkforward_broad_test_fast_revised_first_signal/manifest.json",
+      "has_provenance": true,
+      "registry_match": true,
+      "source_tree_match": true,
+      "data_state_match": false,
+      "feature_contracts_match": true,
+      "program_id": "btc_bybit_alert_engine_broad_fast_revised_first_signal_v1"
+    },
+    {
+      "path": "reports/data-pilot-fast/walkforward_broad_test_fast_revised_highest_probability/manifest.json",
+      "has_provenance": true,
+      "registry_match": false,
+      "source_tree_match": true,
+      "data_state_match": false,
+      "feature_contracts_match": true,
+      "program_id": "btc_bybit_alert_engine_broad_fast_revised_highest_probability_v1"
+    },
+    {
+      "path": "reports/data-pilot-fast/walkforward_broad_test_fast_symmetric/manifest.json",
+      "has_provenance": true,
+      "registry_match": false,
+      "source_tree_match": false,
+      "data_state_match": false,
+      "feature_contracts_match": false,
+      "program_id": "btc_bybit_alert_engine_broad_test_fast_symmetric_v1"
+    },
+    {
+      "path": "reports/data-pilot-fast/walkforward_broad_test_fast_symmetric_pre_warning_fix/manifest.json",
+      "has_provenance": true,
+      "registry_match": false,
+      "source_tree_match": false,
+      "data_state_match": false,
+      "feature_contracts_match": false,
+      "program_id": "btc_bybit_alert_engine_broad_test_fast_symmetric_v1"
+    },
+    {
+      "path": "reports/data-pilot-fast/walkforward_smoke_fast_revised_first_signal/manifest.json",
+      "has_provenance": true,
+      "registry_match": false,
+      "source_tree_match": true,
+      "data_state_match": false,
+      "feature_contracts_match": true,
+      "program_id": "btc_bybit_alert_engine_smoke_fast_revised_first_signal_v1"
+    },
+    {
+      "path": "reports/data-pilot-fast/walkforward_smoke_fast_revised_highest_probability/manifest.json",
+      "has_provenance": true,
+      "registry_match": false,
+      "source_tree_match": true,
+      "data_state_match": false,
+      "feature_contracts_match": true,
+      "program_id": "btc_bybit_alert_engine_smoke_fast_revised_highest_probability_v1"
+    },
+    {
+      "path": "reports/data-pilot-fast/walkforward_smoke_fast_symmetric/manifest.json",
+      "has_provenance": true,
+      "registry_match": false,
+      "source_tree_match": false,
+      "data_state_match": false,
+      "feature_contracts_match": false,
+      "program_id": "btc_bybit_alert_engine_smoke_fast_symmetric_v1"
+    },
+    {
+      "path": "reports/data-pilot-fast/walkforward_smoke_fast_symmetric_pre_warning_fix/manifest.json",
+      "has_provenance": true,
+      "registry_match": false,
+      "source_tree_match": false,
+      "data_state_match": false,
+      "feature_contracts_match": false,
+      "program_id": "btc_bybit_alert_engine_smoke_fast_symmetric_v1"
+    }
+  ]
+}

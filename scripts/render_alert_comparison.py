@@ -12,6 +12,7 @@ SCOPE_COLORS = {
     "event": "#1f4b99",
     "portfolio": "#2f855a",
 }
+CARD_WIDTH = 148
 
 
 def _load(csv_path: Path, scope: str) -> pd.DataFrame:
@@ -51,24 +52,40 @@ def build_dashboard(event_frame: pd.DataFrame, portfolio_frame: pd.DataFrame, *,
     alt.data_transformers.disable_max_rows()
     combined = pd.concat([event_frame, portfolio_frame], ignore_index=True)
     summary = _summary_frame(event_frame, portfolio_frame)
+    chart_width = max(len(summary["order"].drop_duplicates()) * CARD_WIDTH, 720)
 
     cards = (
         alt.Chart(summary)
         .mark_rect(cornerRadius=10, stroke="#d9e2ec", strokeWidth=1)
         .encode(
-            x=alt.X("order:O", axis=None, sort=list(summary["order"].drop_duplicates())),
+            x=alt.X(
+                "order:O",
+                axis=None,
+                sort=list(summary["order"].drop_duplicates()),
+                scale=alt.Scale(paddingInner=0.08, paddingOuter=0.04),
+            ),
             y=alt.Y("scope:N", axis=alt.Axis(title=None)),
             color=alt.value("#f7fafc"),
         )
-        .properties(width=130, height=90, title=title)
+        .properties(width=chart_width, height=90, title=title)
     )
     card_metric = alt.Chart(summary).mark_text(dy=-10, fontSize=13, fontWeight="bold", color="#4a5568").encode(
-        x=alt.X("order:O", axis=None, sort=list(summary["order"].drop_duplicates())),
+        x=alt.X(
+            "order:O",
+            axis=None,
+            sort=list(summary["order"].drop_duplicates()),
+            scale=alt.Scale(paddingInner=0.08, paddingOuter=0.04),
+        ),
         y="scope:N",
         text="metric:N",
     )
     card_value = alt.Chart(summary).mark_text(dy=12, fontSize=18, fontWeight=700, color="#1a202c").encode(
-        x=alt.X("order:O", axis=None, sort=list(summary["order"].drop_duplicates())),
+        x=alt.X(
+            "order:O",
+            axis=None,
+            sort=list(summary["order"].drop_duplicates()),
+            scale=alt.Scale(paddingInner=0.08, paddingOuter=0.04),
+        ),
         y="scope:N",
         text="label:N",
     )

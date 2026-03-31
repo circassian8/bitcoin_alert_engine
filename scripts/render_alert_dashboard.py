@@ -14,6 +14,7 @@ OUTCOME_COLORS = {
     "sl": "#c53030",
     "timeout": "#d69e2e",
 }
+CARD_WIDTH = 148
 
 
 def _format_metric(value: float | int | None, *, kind: str) -> str:
@@ -64,8 +65,9 @@ def build_summary_cards(frame: pd.DataFrame, title: str) -> alt.Chart:
             ]
         )
     cards = pd.DataFrame(rows)
+    chart_width = max(len(cards) * CARD_WIDTH, 720)
     base = alt.Chart(cards).encode(
-        x=alt.X("order:O", axis=None, sort=list(cards["order"])),
+        x=alt.X("order:O", axis=None, sort=list(cards["order"]), scale=alt.Scale(paddingInner=0.08, paddingOuter=0.04)),
     )
     rect = base.mark_rect(cornerRadius=10, stroke="#d9e2ec", strokeWidth=1).encode(
         color=alt.value("#f7fafc"),
@@ -84,7 +86,7 @@ def build_summary_cards(frame: pd.DataFrame, title: str) -> alt.Chart:
     ).encode(text="value:N")
     return (
         alt.layer(rect, metric, value)
-        .properties(width=130, height=74, title=title)
+        .properties(width=chart_width, height=74, title=title)
     )
 
 

@@ -170,6 +170,39 @@ btc-alert-engine features options-deribit --data-dir ./data
 btc-alert-engine features macro-veto --data-dir ./data
 ```
 
+
+### Fast revised continuation suite
+
+To evaluate the refined compressed 1h / 15m / 5m continuation family, first rebuild the fast derived artifacts with the current code:
+
+```bash
+btc-alert-engine materialize bybit-bars --input ./data/raw --data-dir ./data
+btc-alert-engine features bybit-foundation --data-dir ./data --profiles core fast
+```
+
+If fast experiments ever show `no_candidates`, do **not** assume the strategy is dead before checking verification output for stale `trend_bybit_fast` / `regime_bybit_fast` artifacts. The verification report now warns when derived blocks are missing fields expected by the current contracts.
+
+Then run either overlap policy directly:
+
+```bash
+bash scripts/run_real_data_broad_walkforward_fast_revised_first_signal.sh
+bash scripts/run_real_data_broad_walkforward_fast_revised_highest_probability.sh
+```
+
+Or run the full revised fast suite and post-process the outputs:
+
+```bash
+bash scripts/run_real_data_fast_revised_suite.sh
+```
+
+That suite writes manifest-driven walk-forward outputs for:
+- current fast S2 baseline under the revised code path
+- setup-anchored stop + small trigger ATR buffer + 1.25R
+- setup-anchored stop + moderate trigger ATR buffer + 1.50R
+- setup-anchored stop + moderate trigger ATR buffer + 1.25R
+
+The post-process step exports final event and portfolio alerts for the best revised fast variant and renders comparison dashboards against the current fast S2 baseline.
+
 ## 6. Verify before running experiments
 
 ```bash

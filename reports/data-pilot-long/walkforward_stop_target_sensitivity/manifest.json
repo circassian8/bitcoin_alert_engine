@@ -1,0 +1,44 @@
+{
+  "program_id": "btc_bybit_alert_engine_broad_stop_target_sensitivity_v1",
+  "symbol": "BTCUSDT",
+  "available_models": [
+    "baseline"
+  ],
+  "portfolio_evaluation": {
+    "mode": "one_position_at_a_time",
+    "selection_policy": "first_signal",
+    "cooldown_minutes": 0
+  },
+  "experiments": [
+    {
+      "experiment_id": "S0_native_continuation",
+      "generator": "continuation_v1",
+      "blocks": [
+        "trend_bybit"
+      ],
+      "dataset_rows": 167,
+      "skip_reason": null,
+      "selected_model": "baseline"
+    },
+    {
+      "experiment_id": "S0_native_continuation_stop150_tp133",
+      "generator": "continuation_v1",
+      "blocks": [
+        "trend_bybit"
+      ],
+      "dataset_rows": 167,
+      "skip_reason": null,
+      "selected_model": "baseline"
+    },
+    {
+      "experiment_id": "S0_native_continuation_stop175_tp114",
+      "generator": "continuation_v1",
+      "blocks": [
+        "trend_bybit"
+      ],
+      "dataset_rows": 167,
+      "skip_reason": null,
+      "selected_model": "baseline"
+    }
+  ]
+}

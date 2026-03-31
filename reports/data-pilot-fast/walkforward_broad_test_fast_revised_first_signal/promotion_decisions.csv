@@ -1,0 +1,5 @@
+experiment_id,selected_model,parent_experiment,promote,reason,final_expectancy_r_per_alert,final_worst_20_trade_drawdown_r
+S2_current_fast_crowding_feature,baseline,,True,root_experiment,0.0984311141747874,8.207911007838845
+F1_setup_anchor_smallbuf_tp125,baseline,,True,root_experiment,0.1584616230188485,8.701635603581463
+F2_setup_anchor_modbuf_tp150,baseline,,True,root_experiment,0.09834408371064943,8.214088528052798
+F3_setup_anchor_modbuf_tp125,baseline,,True,root_experiment,0.15136303413533586,8.714088528052798

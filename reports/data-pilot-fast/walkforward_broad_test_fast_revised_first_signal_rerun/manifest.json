@@ -1,0 +1,107 @@
+{
+  "provenance": {
+    "created_at_utc": "2026-03-30T15:24:50.957686+00:00",
+    "package_version": "0.7.0",
+    "project_root": "/Users/nasrenkaraf/Documents/Projects/bitcoin_alert_engine",
+    "git_commit": "0b586005d5bb5ef72296bfa3dc038aef96af64b8",
+    "source_tree_sha256": "69ca4ac8dd250485464f61c0185df4451dff132f1d08547afc7963062ce6f72d",
+    "data_dir": "/Users/nasrenkaraf/Documents/Projects/bitcoin_alert_engine/data-pilot-fast",
+    "data_state_sha256": "642cdf903f0b4e6d41d176294b0188272e707838644f86b9900506fe037c4a06",
+    "registry_path": "/Users/nasrenkaraf/Documents/Projects/bitcoin_alert_engine/research_registry_broad_test_fast_revised_first_signal.yaml",
+    "registry_sha256": "15d1ed2cb4720f72e98c8976f025a799cc9b703d98369b9d63c83dc4fd350fe2",
+    "feature_contracts_path": "/Users/nasrenkaraf/Documents/Projects/bitcoin_alert_engine/feature_contracts.yaml",
+    "feature_contracts_sha256": "49c99e675a975eb3cbc34f065aa87c24a147fa617d501e9345b038934fe4c729"
+  },
+  "program_id": "btc_bybit_alert_engine_broad_fast_revised_first_signal_v1",
+  "symbol": "BTCUSDT",
+  "available_models": [
+    "baseline"
+  ],
+  "portfolio_evaluation": {
+    "mode": "one_position_at_a_time",
+    "selection_policy": "first_signal",
+    "cooldown_minutes": 0
+  },
+  "experiments": [
+    {
+      "experiment_id": "S2_current_fast_crowding_feature",
+      "generator": "continuation_v1_fast",
+      "blocks": [
+        "trend_bybit_fast",
+        "regime_bybit_fast",
+        "crowding_bybit_feature"
+      ],
+      "dataset_rows": 556,
+      "skip_reason": null,
+      "selected_model": "baseline",
+      "candidate_side_counts": {
+        "long": 303,
+        "short": 253
+      },
+      "label_side_counts": {
+        "long": 303,
+        "short": 253
+      }
+    },
+    {
+      "experiment_id": "F1_setup_anchor_smallbuf_tp125",
+      "generator": "continuation_v1_fast",
+      "blocks": [
+        "trend_bybit_fast",
+        "regime_bybit_fast",
+        "crowding_bybit_feature"
+      ],
+      "dataset_rows": 556,
+      "skip_reason": null,
+      "selected_model": "baseline",
+      "candidate_side_counts": {
+        "long": 303,
+        "short": 253
+      },
+      "label_side_counts": {
+        "long": 303,
+        "short": 253
+      }
+    },
+    {
+      "experiment_id": "F2_setup_anchor_modbuf_tp150",
+      "generator": "continuation_v1_fast",
+      "blocks": [
+        "trend_bybit_fast",
+        "regime_bybit_fast",
+        "crowding_bybit_feature"
+      ],
+      "dataset_rows": 556,
+      "skip_reason": null,
+      "selected_model": "baseline",
+      "candidate_side_counts": {
+        "long": 303,
+        "short": 253
+      },
+      "label_side_counts": {
+        "long": 303,
+        "short": 253
+      }
+    },
+    {
+      "experiment_id": "F3_setup_anchor_modbuf_tp125",
+      "generator": "continuation_v1_fast",
+      "blocks": [
+        "trend_bybit_fast",
+        "regime_bybit_fast",
+        "crowding_bybit_feature"
+      ],
+      "dataset_rows": 556,
+      "skip_reason": null,
+      "selected_model": "baseline",
+      "candidate_side_counts": {
+        "long": 303,
+        "short": 253
+      },
+      "label_side_counts": {
+        "long": 303,
+        "short": 253
+      }
+    }
+  ]
+}

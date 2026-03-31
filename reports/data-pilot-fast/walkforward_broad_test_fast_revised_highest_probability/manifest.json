@@ -1,0 +1,83 @@
+{
+  "provenance": {
+    "created_at_utc": "2026-03-30T14:32:36.854318+00:00",
+    "package_version": "0.7.0",
+    "project_root": "/Users/nasrenkaraf/Documents/Projects/bitcoin_alert_engine",
+    "git_commit": "0b586005d5bb5ef72296bfa3dc038aef96af64b8",
+    "source_tree_sha256": "69ca4ac8dd250485464f61c0185df4451dff132f1d08547afc7963062ce6f72d",
+    "data_dir": "/Users/nasrenkaraf/Documents/Projects/bitcoin_alert_engine/data-pilot-fast",
+    "data_state_sha256": "d14ae135d35aea97bdbebca57c859fde4edc4571ef60508792f77503542c8af0",
+    "registry_path": "/Users/nasrenkaraf/Documents/Projects/bitcoin_alert_engine/research_registry_broad_test_fast_revised_highest_probability.yaml",
+    "registry_sha256": "9cf0d835f5080e982d81c724d3983e38eeb2ea986767e4303d31825c0948fae3",
+    "feature_contracts_path": "/Users/nasrenkaraf/Documents/Projects/bitcoin_alert_engine/feature_contracts.yaml",
+    "feature_contracts_sha256": "49c99e675a975eb3cbc34f065aa87c24a147fa617d501e9345b038934fe4c729"
+  },
+  "program_id": "btc_bybit_alert_engine_broad_fast_revised_highest_probability_v1",
+  "symbol": "BTCUSDT",
+  "available_models": [
+    "baseline"
+  ],
+  "portfolio_evaluation": {
+    "mode": "one_position_at_a_time",
+    "selection_policy": "highest_probability",
+    "cooldown_minutes": 0
+  },
+  "experiments": [
+    {
+      "experiment_id": "S2_current_fast_crowding_feature",
+      "generator": "continuation_v1_fast",
+      "blocks": [
+        "trend_bybit_fast",
+        "regime_bybit_fast",
+        "crowding_bybit_feature"
+      ],
+      "dataset_rows": 0,
+      "skip_reason": "no_candidates",
+      "selected_model": null,
+      "candidate_side_counts": {},
+      "label_side_counts": {}
+    },
+    {
+      "experiment_id": "F1_setup_anchor_smallbuf_tp125",
+      "generator": "continuation_v1_fast",
+      "blocks": [
+        "trend_bybit_fast",
+        "regime_bybit_fast",
+        "crowding_bybit_feature"
+      ],
+      "dataset_rows": 0,
+      "skip_reason": "no_candidates",
+      "selected_model": null,
+      "candidate_side_counts": {},
+      "label_side_counts": {}
+    },
+    {
+      "experiment_id": "F2_setup_anchor_modbuf_tp150",
+      "generator": "continuation_v1_fast",
+      "blocks": [
+        "trend_bybit_fast",
+        "regime_bybit_fast",
+        "crowding_bybit_feature"
+      ],
+      "dataset_rows": 0,
+      "skip_reason": "no_candidates",
+      "selected_model": null,
+      "candidate_side_counts": {},
+      "label_side_counts": {}
+    },
+    {
+      "experiment_id": "F3_setup_anchor_modbuf_tp125",
+      "generator": "continuation_v1_fast",
+      "blocks": [
+        "trend_bybit_fast",
+        "regime_bybit_fast",
+        "crowding_bybit_feature"
+      ],
+      "dataset_rows": 0,
+      "skip_reason": "no_candidates",
+      "selected_model": null,
+      "candidate_side_counts": {},
+      "label_side_counts": {}
+    }
+  ]
+}

@@ -119,8 +119,8 @@ candidate_generators:
       - ema50_slope_4h_5bars > 0
       setup:
       - breakout_above_prior_20bar_high_1h_within_last_10bars
-      - impulse_size_1h >= 1.0 * atr_1h
-      - pullback_depth_frac in [0.20, 0.60]
+      - impulse_size_1h >= 0.7 * atr_1h
+      - pullback_depth_frac in [0.15, 0.70]
       - pullback_low > breakout_level - 0.25 * atr_1h
       - pullback_low > ema50_4h
       trigger:
@@ -153,7 +153,7 @@ labeling:
   - net_r_24h_timeout
   - minutes_to_tp_or_sl
   take_profit_r_by_module:
-    continuation_v1: 2.0
+    continuation_v1: 1.5
     stress_reversal_v0: 1.5
   latency_ms: 0
   barrier_simulation:
@@ -178,17 +178,26 @@ experiments:
   generator: continuation_v1
   blocks:
   - trend_bybit
+  generator_params: &continuation_relaxed_params
+    min_impulse_atr: 0.7
+    pullback_depth_min: 0.15
+    pullback_depth_max: 0.70
+    bounce_depth_min: 0.15
+    bounce_depth_max: 0.70
+    target_r_multiple: 1.5
 - id: S0_native_continuation_stop150
   generator: continuation_v1
   blocks:
   - trend_bybit
   generator_params:
+    <<: *continuation_relaxed_params
     stop_width_multiplier: 1.5
 - id: S0_native_continuation_stop175
   generator: continuation_v1
   blocks:
   - trend_bybit
   generator_params:
+    <<: *continuation_relaxed_params
     stop_width_multiplier: 1.75
 validation:
   archive_target:
@@ -217,3 +226,14 @@ validation:
 execution_costs:
   notionals_usd:
   - 5000
+  - 25000
+  optimistic:
+    fee_bps_per_side: 2
+    slippage: 0.5_spread
+  base:
+    fee_bps_per_side: 5
+    slippage_formula: max(0.5_spread, 0.5bps, notional_over_top10_depth_times_10bps)
+  stressed:
+    fee_bps_per_side: 8
+    slippage_formula: 2x_base_slippage
+    latency_seconds: 1

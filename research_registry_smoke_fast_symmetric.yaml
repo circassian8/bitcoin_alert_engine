@@ -154,7 +154,7 @@ labeling:
   - net_r_24h_timeout
   - minutes_to_tp_or_sl
   take_profit_r_by_module:
-    continuation_v1: 2.0
+    continuation_v1: 1.5
     stress_reversal_v0: 1.5
     continuation_v1_fast: 1.5
     stress_reversal_v0_fast: 1.5
@@ -183,75 +183,45 @@ experiments:
   generator: continuation_v1_fast
   blocks:
   - trend_bybit_fast
-  generator_params:
-    stop_width_multiplier: 1.5
-    target_r_multiple: 1.5
-    min_impulse_atr: 0.7
-    pullback_depth_range:
-    - 0.15
-    - 0.70
-    bounce_depth_range:
-    - 0.15
-    - 0.70
   sides:
   - long
   - short
+  generator_params: &fast_continuation_relaxed_params
+    min_impulse_atr: 0.7
+    pullback_depth_min: 0.15
+    pullback_depth_max: 0.70
+    bounce_depth_min: 0.15
+    bounce_depth_max: 0.70
+    target_r_multiple: 1.5
 - id: S1_native_plus_regime
   generator: continuation_v1_fast
   blocks:
   - trend_bybit_fast
   - regime_bybit_fast
-  generator_params:
-    stop_width_multiplier: 1.5
-    target_r_multiple: 1.5
-    min_impulse_atr: 0.7
-    pullback_depth_range:
-    - 0.15
-    - 0.70
-    bounce_depth_range:
-    - 0.15
-    - 0.70
   sides:
   - long
   - short
+  generator_params: *fast_continuation_relaxed_params
 - id: S2_plus_crowding_feature
   generator: continuation_v1_fast
   blocks:
   - trend_bybit_fast
   - regime_bybit_fast
   - crowding_bybit_feature
-  generator_params:
-    stop_width_multiplier: 1.5
-    target_r_multiple: 1.5
-    min_impulse_atr: 0.7
-    pullback_depth_range:
-    - 0.15
-    - 0.70
-    bounce_depth_range:
-    - 0.15
-    - 0.70
   sides:
   - long
   - short
+  generator_params: *fast_continuation_relaxed_params
 - id: S3_plus_crowding_veto
   generator: continuation_v1_fast
   blocks:
   - trend_bybit_fast
   - regime_bybit_fast
   - crowding_bybit_veto
-  generator_params:
-    stop_width_multiplier: 1.5
-    target_r_multiple: 1.5
-    min_impulse_atr: 0.7
-    pullback_depth_range:
-    - 0.15
-    - 0.70
-    bounce_depth_range:
-    - 0.15
-    - 0.70
   sides:
   - long
   - short
+  generator_params: *fast_continuation_relaxed_params
 validation:
   archive_target:
     start: 2024-01-01
@@ -263,7 +233,7 @@ validation:
     train_days: 150
     calibrate_days: 21
     test_days: 21
-    purge_hours: 36
+    purge_hours: 24
     embargo_hours: 24
   break_reports:
   - pre_2023_10_23

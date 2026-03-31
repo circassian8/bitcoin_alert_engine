@@ -1,0 +1,5 @@
+experiment_id,selection_kind,side,n_alerts,precision_tp_before_sl,expectancy_r_per_alert,hit_rate,mean_probability,median_holding_minutes
+S2_plus_crowding_feature,event,long,101,0.36633663366336633,0.12366541326594657,0.36633663366336633,0.26292452756461926,145.0
+S2_plus_crowding_feature,event,short,109,0.3853211009174312,0.2115510778153839,0.3853211009174312,0.25046913840018153,105.0
+S2_plus_crowding_feature,portfolio,long,50,0.36,0.12980413479721203,0.36,0.2666242539165458,177.5
+S2_plus_crowding_feature,portfolio,short,57,0.3684210526315789,0.21156258740134812,0.3684210526315789,0.25570307149254523,140.0

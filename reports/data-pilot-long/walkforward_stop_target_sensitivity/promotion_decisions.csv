@@ -1,0 +1,4 @@
+experiment_id,selected_model,parent_experiment,promote,reason,final_expectancy_r_per_alert,final_worst_20_trade_drawdown_r
+S0_native_continuation,baseline,,True,root_experiment,0.5222311996461778,3.0
+S0_native_continuation_stop150_tp133,baseline,,True,root_experiment,0.6004294539156928,1.0
+S0_native_continuation_stop175_tp114,baseline,,True,root_experiment,0.6289010634775403,1.0

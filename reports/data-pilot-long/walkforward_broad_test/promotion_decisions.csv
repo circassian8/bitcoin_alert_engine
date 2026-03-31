@@ -1,0 +1,5 @@
+experiment_id,selected_model,parent_experiment,promote,reason,final_expectancy_r_per_alert,final_worst_20_trade_drawdown_r,parent_final_expectancy_r_per_alert,expectancy_delta_r,parent_final_worst_20_trade_drawdown_r,drawdown_improvement_pct,positive_sign_fraction,break_consistent
+S0_native_continuation,baseline,,True,root_experiment,0.5222311996461778,3.0,,,,,,
+S1_native_plus_regime,baseline,S0_native_continuation,False,did_not_meet_promotion_rules,0.58301022700765,3.0,0.5222311996461778,0.060779027361472227,3.0,0.0,0.5,True
+S2_plus_crowding_feature,baseline,S1_native_plus_regime,False,did_not_meet_promotion_rules,0.2108152976763901,3.0,0.58301022700765,-0.37219492933125997,3.0,0.0,0.0,True
+S3_plus_crowding_veto,baseline,S1_native_plus_regime,False,did_not_meet_promotion_rules,0.48854424214149345,3.0,0.58301022700765,-0.0944659848661566,3.0,0.0,0.0,True

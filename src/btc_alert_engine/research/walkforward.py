@@ -19,7 +19,11 @@ from sklearn.preprocessing import StandardScaler
 from btc_alert_engine.config import default_reports_root, load_research_registry
 from btc_alert_engine.provenance import report_provenance
 from btc_alert_engine.research.execution import build_raw_execution_tape
-from btc_alert_engine.research.experiments import build_experiment_event_frame, feature_columns_for_experiment
+from btc_alert_engine.research.experiments import (
+    build_experiment_event_frame,
+    feature_columns_for_experiment,
+    fee_bps_per_side_from_registry,
+)
 
 try:  # pragma: no cover - optional dependency
     from lightgbm import LGBMClassifier
@@ -517,7 +521,10 @@ def _apply_portfolio_policy(
             seed = remaining.iloc[0]
             seed_end = int(seed["exit_ts"]) + cooldown_ms
             cluster_frame = remaining[remaining["entry_ts"] < seed_end].copy()
-            chosen = cluster_frame.sort_values(["p", "entry_ts", "ts"], ascending=[False, True, True]).iloc[0]
+            if cluster_frame.empty:
+                chosen = seed
+            else:
+                chosen = cluster_frame.sort_values(["p", "entry_ts", "ts"], ascending=[False, True, True]).iloc[0]
             chosen_rows.append(chosen)
             next_free_ts = int(chosen["exit_ts"]) + cooldown_ms
             remaining = remaining[remaining["entry_ts"] >= next_free_ts].reset_index(drop=True)
@@ -1096,6 +1103,7 @@ def run_walkforward_experiments(
     if raw_paths:
         raw_tape, _ = build_raw_execution_tape(raw_paths, symbol=symbol, tolerate_gaps=True)
     latency_ms = int(registry.labeling.get("latency_ms", 0))
+    fee_bps_per_side = fee_bps_per_side_from_registry(registry)
     reports_root = Path(output_dir) if output_dir is not None else default_reports_root(data_root) / "walkforward"
     reports_root.mkdir(parents=True, exist_ok=True)
 
@@ -1126,6 +1134,7 @@ def run_walkforward_experiments(
             raw_tape=raw_tape,
             slippage_bps=slippage_bps,
             latency_ms=latency_ms,
+            fee_bps_per_side=fee_bps_per_side,
             skip_missing=skip_missing,
         )
         if dataset.skip_reason or dataset.frame.empty:

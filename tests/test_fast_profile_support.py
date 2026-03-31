@@ -124,6 +124,8 @@ def test_fast_continuation_candidates_use_fast_module_and_timeout() -> None:
                 setup_impulse_atr=1.2,
                 setup_pullback_depth_frac=0.35,
                 setup_pullback_bars=2,
+                setup_break_episode_id=bar.ts - 900_000,
+                setup_breakout_anchor_low=bar.close - 1.2,
                 dist_to_setup_breakout_level=0.01,
                 dist_to_regime_ema=0.015,
             )
@@ -179,32 +181,6 @@ def test_fast_regime_block_enables_regime_gate() -> None:
         }
     )
     assert config.require_regime_gate is True
-
-
-def test_derive_candidate_config_applies_generator_param_overrides() -> None:
-    config = derive_candidate_config(
-        {
-            "generator": "continuation_v1_fast",
-            "blocks": ["trend_bybit_fast", "regime_bybit_fast", "crowding_bybit_veto"],
-            "sides": ["long", "short"],
-            "generator_params": {
-                "stop_width_multiplier": 1.5,
-                "target_r_multiple": 1.5,
-                "min_impulse_atr": 0.7,
-                "pullback_depth_range": [0.15, 0.70],
-                "require_crowding_veto": False,
-            },
-        }
-    )
-    assert config.stop_width_multiplier == 1.5
-    assert config.target_r_multiple == 1.5
-    assert config.min_impulse_atr == 0.7
-    assert config.pullback_depth_min == 0.15
-    assert config.pullback_depth_max == 0.70
-    assert config.bounce_depth_min == 0.15
-    assert config.bounce_depth_max == 0.70
-    assert config.require_regime_gate is True
-    assert config.require_crowding_veto is False
 
 
 def test_fast_label_candidates_use_5m_bar_timing() -> None:

@@ -1,0 +1,104 @@
+{
+  "provenance": {
+    "created_at_utc": "2026-03-29T15:53:58.518191+00:00",
+    "package_version": "0.7.0",
+    "project_root": "/Users/nasrenkaraf/Documents/Projects/bitcoin_alert_engine",
+    "git_commit": "f1b5210663926a8b7851dd835363f9be212ea43d",
+    "source_tree_sha256": "adeece0ab2435f2296207a1c44025fb716cc5c126edd2b89f469e8e771f53ba4",
+    "data_dir": "/Users/nasrenkaraf/Documents/Projects/bitcoin_alert_engine/data-pilot-fast",
+    "data_state_sha256": "d14ae135d35aea97bdbebca57c859fde4edc4571ef60508792f77503542c8af0",
+    "registry_path": "/Users/nasrenkaraf/Documents/Projects/bitcoin_alert_engine/research_registry_smoke_fast_symmetric.yaml",
+    "registry_sha256": "8a1adc209d826e7d10fd1c6a7d140b52bcccee62699677b226a804625742b117",
+    "feature_contracts_path": "/Users/nasrenkaraf/Documents/Projects/bitcoin_alert_engine/feature_contracts.yaml",
+    "feature_contracts_sha256": "fd171fb3d75f8eb3a5993e9620bb84490f2247d8511693f48958c1addbfe6892"
+  },
+  "program_id": "btc_bybit_alert_engine_smoke_fast_symmetric_v1",
+  "symbol": "BTCUSDT",
+  "available_models": [
+    "baseline"
+  ],
+  "portfolio_evaluation": {
+    "mode": "one_position_at_a_time",
+    "selection_policy": "first_signal",
+    "cooldown_minutes": 0
+  },
+  "experiments": [
+    {
+      "experiment_id": "S0_native_continuation",
+      "generator": "continuation_v1_fast",
+      "blocks": [
+        "trend_bybit_fast"
+      ],
+      "dataset_rows": 587,
+      "skip_reason": null,
+      "selected_model": "baseline",
+      "candidate_side_counts": {
+        "long": 334,
+        "short": 253
+      },
+      "label_side_counts": {
+        "long": 334,
+        "short": 253
+      }
+    },
+    {
+      "experiment_id": "S1_native_plus_regime",
+      "generator": "continuation_v1_fast",
+      "blocks": [
+        "trend_bybit_fast",
+        "regime_bybit_fast"
+      ],
+      "dataset_rows": 587,
+      "skip_reason": null,
+      "selected_model": "baseline",
+      "candidate_side_counts": {
+        "long": 334,
+        "short": 253
+      },
+      "label_side_counts": {
+        "long": 334,
+        "short": 253
+      }
+    },
+    {
+      "experiment_id": "S2_plus_crowding_feature",
+      "generator": "continuation_v1_fast",
+      "blocks": [
+        "trend_bybit_fast",
+        "regime_bybit_fast",
+        "crowding_bybit_feature"
+      ],
+      "dataset_rows": 587,
+      "skip_reason": null,
+      "selected_model": "baseline",
+      "candidate_side_counts": {
+        "long": 334,
+        "short": 253
+      },
+      "label_side_counts": {
+        "long": 334,
+        "short": 253
+      }
+    },
+    {
+      "experiment_id": "S3_plus_crowding_veto",
+      "generator": "continuation_v1_fast",
+      "blocks": [
+        "trend_bybit_fast",
+        "regime_bybit_fast",
+        "crowding_bybit_veto"
+      ],
+      "dataset_rows": 580,
+      "skip_reason": null,
+      "selected_model": "baseline",
+      "candidate_side_counts": {
+        "long": 328,
+        "short": 252
+      },
+      "label_side_counts": {
+        "long": 328,
+        "short": 252
+      }
+    }
+  ]
+}

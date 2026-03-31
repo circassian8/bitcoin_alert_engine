@@ -51,12 +51,16 @@ feature_blocks:
     - setup_impulse_atr
     - setup_pullback_depth_frac
     - setup_pullback_bars
+    - setup_break_episode_id
+    - setup_breakout_anchor_low
     - dist_to_setup_breakout_level
     - dist_to_regime_ema
     - setup_breakdown_age
     - setup_downside_impulse_atr
     - setup_bounce_depth_frac
     - setup_bounce_bars
+    - setup_breakdown_episode_id
+    - setup_breakdown_anchor_high
     - dist_to_setup_breakdown_level
     - dist_below_regime_ema
   regime_bybit:

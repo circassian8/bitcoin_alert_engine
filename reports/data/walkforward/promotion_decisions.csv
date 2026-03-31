@@ -1,0 +1,14 @@
+experiment_id,selected_model,parent_experiment,promote,reason
+A0_native_continuation,,,False,no_model_selected
+A1_native_plus_soft_regime,,,False,no_model_selected
+A2_native_plus_bybit_crowding_feature,,,False,no_model_selected
+A3_native_plus_bybit_crowding_veto,,,False,no_model_selected
+A4_native_plus_micro_score,,,False,no_model_selected
+A5_native_plus_micro_gate,,,False,no_model_selected
+A6_plus_deribit_options,,,False,no_model_selected
+A7_plus_glassnode_options,,,False,no_model_selected
+A8_plus_macro_veto,,,False,no_model_selected
+A9_plus_glassnode_onchain,,,False,no_model_selected
+A10_plus_coinglass_overlay,,,False,no_model_selected
+A11_cryptoquant_instead_of_glassnode,,,False,no_model_selected
+R1_stress_reversal,,,False,no_model_selected

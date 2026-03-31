@@ -1,0 +1,5 @@
+experiment_id,selected_model,parent_experiment,promote,reason,final_expectancy_r_per_alert,final_worst_20_trade_drawdown_r,parent_final_expectancy_r_per_alert,expectancy_delta_r,parent_final_worst_20_trade_drawdown_r,drawdown_improvement_pct,positive_sign_fraction,break_consistent
+S0_native_continuation,baseline,,True,root_experiment,1.4,1.0,,,,,,
+S1_native_plus_regime,baseline,S0_native_continuation,False,did_not_meet_promotion_rules,-1.0,0.0,1.4,-2.4,1.0,100.0,0.25,True
+S2_plus_crowding_feature,baseline,S1_native_plus_regime,False,did_not_meet_promotion_rules,,,-1.0,,0.0,,0.0,True
+S3_plus_crowding_veto,baseline,S1_native_plus_regime,False,did_not_meet_promotion_rules,,,-1.0,,0.0,,0.0,True
